@@ -118,14 +118,14 @@ export class CacheService {
       .run(chatId, JSON.stringify(data), Date.now());
   }
 
-  // История диалога
+  // История диалога (жесткий лимит ≤ 6)
   async pushMessage(chatId: string, message: any): Promise<void> {
     const key = `history:${chatId}`;
 
     try {
       const { redisService } = await import('../services/RedisService');
       if (redisService.isAvailable()) {
-        await redisService.pushToList(key, JSON.stringify(message), 10, 1800);
+        await redisService.pushToList(key, JSON.stringify(message), 6, 1800);
         logger.info(`✨ [History] Redis PUSH for chat: ${chatId}`);
         return;
       }
@@ -138,7 +138,7 @@ export class CacheService {
       .run(chatId, JSON.stringify(message), Date.now());
   }
 
-  async getHistory(chatId: string, limit: number = 10): Promise<any[]> {
+  async getHistory(chatId: string, limit: number = 6): Promise<any[]> {
     const key = `history:${chatId}`;
 
     try {

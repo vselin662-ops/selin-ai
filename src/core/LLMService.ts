@@ -235,46 +235,70 @@ export async function callWithWebSearch(userMessage: string, systemPrompt: strin
   } catch { return null; }
 }
 
-const blockState = new Map<string, { consecutiveFailures: number; blockedUntil: number }>();
+const TEN_MINUTES_MS = 10 * 60 * 1000;
+const blockState = new Map<string, { blockedUntil: number; reason: string }>();
 
-function isBlocked(provider: string): boolean {
+export function isBlocked(provider: string): boolean {
   const state = blockState.get(provider);
   if (!state) return false;
   if (Date.now() < state.blockedUntil) {
     return true;
   }
+  blockState.delete(provider);
   return false;
 }
 
-function markOk(provider: string) {
+export function markOk(provider: string) {
   blockState.delete(provider);
 }
 
-function markFail(provider: string, error?: any) {
-  const state = blockState.get(provider) || { consecutiveFailures: 0, blockedUntil: 0 };
-  state.consecutiveFailures += 1;
-  
-  const errStr = String(error?.message || error || '').toLowerCase();
-  const isCreditOrRateLimit = errStr.includes('credit') || 
-                              errStr.includes('402') || 
-                              errStr.includes('429') || 
-                              errStr.includes('rate-limit') || 
-                              errStr.includes('rate limit') || 
-                              errStr.includes('quota') || 
-                              errStr.includes('billing') ||
-                              errStr.includes('payment') ||
-                              errStr.includes('insufficient');
-                              
-  if (isCreditOrRateLimit) {
-    state.blockedUntil = Date.now() + 10 * 60 * 1000; // block for 10 minutes
-    logger.warn(`🛑 [CircuitBreaker] Provider ${provider} blocked for 10 minutes due to credit/rate-limit/quota error: ${errStr}`);
-  } else {
-    if (state.consecutiveFailures >= 3) {
-      state.blockedUntil = Date.now() + 60 * 1000; // block for 1 minute for other failures
-    }
-  }
-  blockState.set(provider, state);
+export function markFail(provider: string, error?: any) {
+  const errStr = String(error?.message || error || 'Unknown error');
+  blockState.set(provider, {
+    blockedUntil: Date.now() + TEN_MINUTES_MS,
+    reason: errStr
+  });
+  logger.warn(`🛑 [CircuitBreaker] Provider ${provider} blocked for 10 minutes: ${errStr}`);
 }
+
+// Global request counter for Router diagnostics
+export let globalLlmReqCounter = 0;
+
+// Concurrency Queue: max 2 concurrent calls per provider, backoff 1-2 sec
+export class ProviderConcurrencyQueue {
+  private activeCounts = new Map<string, number>();
+  private readonly maxConcurrent = 2;
+
+  async acquire(provider: string, maxWaitMs = 15000): Promise<() => void> {
+    const startTime = Date.now();
+    while ((this.activeCounts.get(provider) || 0) >= this.maxConcurrent) {
+      if (Date.now() - startTime >= maxWaitMs) {
+        throw new Error(`Очередь провайдера ${provider} переполнена (таймаут ${maxWaitMs}мс)`);
+      }
+      const backoffMs = 1000 + Math.floor(Math.random() * 1000); // 1-2 sec backoff
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+
+    const current = this.activeCounts.get(provider) || 0;
+    this.activeCounts.set(provider, current + 1);
+
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        const count = this.activeCounts.get(provider) || 1;
+        this.activeCounts.set(provider, Math.max(0, count - 1));
+      }
+    };
+  }
+
+  getActiveCount(provider: string): number {
+    return this.activeCounts.get(provider) || 0;
+  }
+}
+
+export const providerQueue = new ProviderConcurrencyQueue();
+export const FALLBACK_PHRASE = "Я временно потерял нить. Повтори через минуту.";
 
 export class LLMService {
   private gemini: GoogleGenAI | null = null;
@@ -454,12 +478,12 @@ export class LLMService {
     const controller = new AbortController();
     const { signal } = controller;
 
-    // Глобальный таймаут на выполнение запроса на 15 секунд
+    // Глобальный таймаут на выполнение запроса на 30 секунд
     const timeoutPromise = new Promise<never>((_, reject) => {
       const timer = setTimeout(() => {
         controller.abort();
         reject(new Error("Timeout"));
-      }, 15000);
+      }, 30000);
       timer.unref();
     });
 
@@ -517,11 +541,11 @@ export class LLMService {
       return response;
     } catch (err: any) {
       if (err.message === "Timeout" || signal.aborted) {
-        logger.warn(`⚠️ [smartCall] Timeout 15s exceeded for chatId: ${chatId}`);
+        logger.warn(`⚠️ [smartCall] Timeout 30s exceeded for chatId: ${chatId}`);
       } else {
         logger.error(`❌ [smartCall] Unhandled error: ${err?.message || err}`);
       }
-      return "Я потерял нить разговора. Связь с нейросетью временно недоступна. Повтори вопрос через минуту.";
+      return FALLBACK_PHRASE;
     }
   }
 
@@ -533,14 +557,17 @@ export class LLMService {
   ): Promise<string> {
     const memory = this.getMemory(chatId);
 
-    // Сохраняем сообщение пользователя
+    // Сохраняем сообщение пользователя и жестко ограничиваем историю ≤ 6 сообщений
     memory.history.push({ role: 'user', content: userMessage, timestamp: Date.now() });
+    if (memory.history.length > 6) {
+      memory.history = memory.history.slice(-6);
+    }
 
-    // Берем последние 6 сообщений для контекста и каждое обрезаем до 8000 символов
+    // Берем последние 6 сообщений для контекста и каждое обрезаем до 4000 символов
     const rawContext = memory.history.slice(-6);
     const context = rawContext.map(msg => ({
       role: msg.role,
-      content: (msg.content || '').slice(0, 8000),
+      content: (msg.content || '').slice(0, 4000),
       timestamp: msg.timestamp
     }));
 
@@ -724,6 +751,7 @@ ${identityBlock}
     ] as any;
 
     // === ROUTING CHAIN (groq → gemini → teamo → openrouter) ===
+    const reqId = ++globalLlmReqCounter;
     const startTime = Date.now();
     const failedList: string[] = [];
     let responseText: string | null = null;
@@ -731,51 +759,77 @@ ${identityBlock}
 
     // Ordered list of providers
     const providersToTry = [
-      ...(this.getGroqClient() ? [{ name: 'groq', call: () => this.callGroq(messages) }] : []),
+      { name: 'groq', call: () => this.callGroq(messages) },
       { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
       { name: 'teamo', call: () => this.callTeamo(messages) },
       { name: 'openrouter', call: () => this.callOpenRouterChain(messages) }
     ];
 
+    const hasUnblocked = providersToTry.some(p => !isBlocked(p.name));
+
     for (const prov of providersToTry) {
-      if (isBlocked(prov.name)) {
+      if (hasUnblocked && isBlocked(prov.name)) {
         failedList.push(`${prov.name} (blocked)`);
+        const blockLog = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=провайдер заблокирован (10 мин ban) задержка=0ms`;
+        console.warn(blockLog);
+        logger.warn(blockLog);
         continue;
       }
 
+      let release: (() => void) | null = null;
+      const provStart = Date.now();
       try {
-        console.log(`🤖 [Router] Attempting provider: ${prov.name}`);
-        const res = await prov.call();
+        release = await providerQueue.acquire(prov.name, 10000);
+
+        // 12s timeout per provider call
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Timeout 12s exceeded")), 12000);
+        });
+        const res = await Promise.race([prov.call(), timeoutPromise]);
+        const latency = Date.now() - provStart;
+
         if (res && res.trim()) {
-          responseText = sanitize(res.trim());
-          successfulProvider = prov.name;
-          markOk(prov.name);
-          break;
-        } else {
-          failedList.push(prov.name);
-          markFail(prov.name, new Error("Empty response"));
+          const sanitized = sanitize(res.trim());
+          if (sanitized && sanitized !== 'Уточните, пожалуйста, вопрос.') {
+            responseText = sanitized;
+            successfulProvider = prov.name;
+            markOk(prov.name);
+            const logLine = `[Router] req=${reqId} provider=${prov.name} статус=ok ошибка=none задержка=${latency}ms`;
+            console.log(logLine);
+            logger.info(logLine);
+            break;
+          }
         }
+        throw new Error("Пустой ответ");
       } catch (err: any) {
-        failedList.push(prov.name);
+        const latency = Date.now() - provStart;
+        const errMsg = err?.message || String(err);
         markFail(prov.name, err);
+        failedList.push(prov.name);
+        const logLine = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=${errMsg} задержка=${latency}ms`;
+        console.warn(logLine);
+        logger.warn(logLine);
+      } finally {
+        if (release) {
+          release();
+        }
       }
     }
 
     const duration = Date.now() - startTime;
-    if (successfulProvider) {
-      // Лог одной строкой: какой провайдер ответил, сколько мс, какие упали.
-      logger.info(`[Router] responded=${successfulProvider} latency=${duration}ms failed=${failedList.join(',') || 'none'}`);
+    if (successfulProvider && responseText) {
+      logger.info(`[Router] req=${reqId} responded=${successfulProvider} latency=${duration}ms failed=${failedList.join(',') || 'none'}`);
       
-      memory.history.push({ role: 'assistant', content: responseText!, timestamp: Date.now() });
-      if (memory.history.length > 30) {
-        memory.history = memory.history.slice(-30);
+      memory.history.push({ role: 'assistant', content: responseText, timestamp: Date.now() });
+      if (memory.history.length > 6) {
+        memory.history = memory.history.slice(-6);
       }
-      return responseText!;
+      return responseText;
     } else {
-      logger.error(`[Router] responded=none latency=${duration}ms failed=${failedList.join(',')}`);
+      logger.error(`[Router] req=${reqId} responded=none latency=${duration}ms failed=${failedList.join(',')}`);
       
       // Если ВСЕ упали — вернуть фразу
-      return "Я потерял нить разговора. Связь с нейросетью временно недоступна. Повтори вопрос через минуту.";
+      return FALLBACK_PHRASE;
     }
   }
 
@@ -1084,33 +1138,27 @@ ${identityBlock}
     return null;
   }
 
-  private async callTeamo(messages: any[]): Promise<string | null> {
+  private async callTeamo(messages: any[]): Promise<string> {
     const key = process.env.TEAMO_API_KEY;
-    if (!key || key.length < 10 || isBlocked("teamo")) return null;
+    if (!key || key.length < 10 || key.includes('your_') || key.includes('placeholder')) {
+      throw new Error("TEAMO_API_KEY is not configured");
+    }
     const base = process.env.TEAMO_BASE_URL || "https://api.teamorouter.com/v1";
     const model = process.env.TEAMO_MODEL || "teamo-balanced";
-    try {
-      const c = new OpenAI({ baseURL: base, apiKey: key, timeout: 30000 });
-      const r = await c.chat.completions.create({
-        messages,
-        model,
-        temperature: 0.7,
-        max_tokens: 2000,
-        reasoning: { exclude: true },
-        include_reasoning: false
-      } as any);
-      const t = r.choices?.[0]?.message?.content;
-      if (t?.trim()) {
-        markOk("teamo");
-        console.log("🧠 [LLM] teamo/" + model);
-        return sanitize(t.trim());
-      }
-    } catch (err: any) {
-      markFail("teamo", err);
-      return null;
+    const c = new OpenAI({ baseURL: base, apiKey: key, timeout: 12000 });
+    const r = await c.chat.completions.create({
+      messages,
+      model,
+      temperature: 0.7,
+      max_tokens: 2000,
+      reasoning: { exclude: true },
+      include_reasoning: false
+    } as any);
+    const t = r.choices?.[0]?.message?.content;
+    if (!t || !t.trim()) {
+      throw new Error("Empty response from Teamo");
     }
-    markFail("teamo", new Error("Empty response"));
-    return null;
+    return sanitize(t.trim());
   }
 
   private async callCompat(messages: any[], model: string): Promise<string | null> {
@@ -1146,15 +1194,16 @@ ${identityBlock}
     return null;
   }
 
-  private async callOpenRouterChain(messages: any[]): Promise<string | null> {
+  private async callOpenRouterChain(messages: any[]): Promise<string> {
     const orKey = process.env.OPENROUTER_API_KEY;
-    if (!orKey || orKey.includes('your_') || orKey.includes('placeholder') || orKey.length < 10 || isBlocked("openrouter")) {
-      return null;
+    if (!orKey || orKey.includes('your_') || orKey.includes('placeholder') || orKey.length < 10) {
+      throw new Error("OPENROUTER_API_KEY is not configured");
     }
 
     const openrouter = new OpenAI({
       baseURL: 'https://openrouter.ai/api/v1',
       apiKey: orKey,
+      timeout: 12000,
       defaultHeaders: {
         'HTTP-Referer': 'https://selin.ai',
         'X-Title': 'SelinAI'
@@ -1168,9 +1217,9 @@ ${identityBlock}
       "qwen/qwen-2.5-72b-instruct"
     ];
 
+    let lastError: any = null;
     for (const model of chainModels) {
       try {
-        console.log(`🤖 [Router] Trying OpenRouter model: ${model}`);
         const completion = await openrouter.chat.completions.create({
           model: model,
           messages,
@@ -1181,75 +1230,70 @@ ${identityBlock}
         } as any);
         const response = completion.choices[0]?.message?.content?.trim();
         if (response) {
-          markOk("openrouter");
           return sanitize(response);
         }
       } catch (err: any) {
-        logger.warn(`⚠️ [Router] OpenRouter model ${model} failed: ${err.message}`);
-        markFail("openrouter", err);
-        if (isBlocked("openrouter")) {
-          break;
-        }
+        lastError = err;
       }
     }
-    return null;
+    throw (lastError || new Error("All OpenRouter models failed"));
   }
 
-  private async callGroq(messages: any[]): Promise<string | null> {
-    try {
-      const groq = this.getGroqClient();
-      if (groq) {
-        const model = await pickGroqModel();
-        const completion = await groq.chat.completions.create({
-          messages,
-          model: model,
-          temperature: 0.8,
-          max_tokens: 2000,
-        });
-        const response = completion.choices[0]?.message?.content?.trim();
-        if (response) {
-          markOk("groq");
-          console.log("🧠 [LLM] groq/" + model);
-          return sanitize(response);
-        }
-      }
-    } catch (err: any) {
-      logger.warn(`⚠️ [callGroq] Groq failed: ${err.message}`);
-      markFail("groq", err);
+  private async callGroq(messages: any[]): Promise<string> {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
+      throw new Error("GROQ_API_KEY is not configured");
     }
-    return null;
+    const groq = this.getGroqClient();
+    if (!groq) {
+      throw new Error("Groq client not available");
+    }
+    const model = await pickGroqModel();
+    const completion = await groq.chat.completions.create({
+      messages,
+      model: model,
+      temperature: 0.8,
+      max_tokens: 2000,
+    });
+    const response = completion.choices[0]?.message?.content?.trim();
+    if (!response) {
+      throw new Error("Empty response from Groq");
+    }
+    return sanitize(response);
   }
 
-  private async callGemini(messages: any[], systemPrompt: string): Promise<string | null> {
-    if (!this.gemini) return null;
-    try {
-      const contents: any[] = [];
-      for (const m of messages) {
-        if (m.role === 'system') continue;
-        contents.push({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        });
-      }
-      const completion = await this.gemini.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: contents,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.8
-        }
+  private async callGemini(messages: any[], systemPrompt: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
+    if (!this.gemini) {
+      this.gemini = new GoogleGenAI({ apiKey });
+    }
+    const contents: any[] = [];
+    for (const m of messages) {
+      if (m.role === 'system') continue;
+      contents.push({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: (m.content || '').slice(0, 4000) }]
       });
-      const response = completion.text?.trim();
-      if (response) {
-        markOk("gemini");
-        console.log("🧠 [LLM] gemini/" + GEMINI_MODEL);
-        return sanitize(response);
-      }
-    } catch (gErr: any) {
-      logger.warn(`⚠️ [callGemini] Gemini failed: ${gErr?.message || gErr}`);
-      markFail("gemini", gErr);
     }
-    return null;
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: [{ text: 'Привет' }] });
+    }
+    const completion = await this.gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: contents,
+      config: {
+        systemInstruction: systemPrompt || undefined,
+        temperature: 0.8
+      }
+    });
+    const response = completion.text?.trim();
+    if (!response) {
+      throw new Error("Empty response from Gemini");
+    }
+    return sanitize(response);
   }
 }
 

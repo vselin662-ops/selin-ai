@@ -2,6 +2,18 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import dotenv from "dotenv";
+
+// 0. Global Process Error Handlers - Log full stack and keep process alive
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  const stack = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+  console.error(`🚨 [UnhandledRejection] Process kept alive. Stack:\n${stack}`);
+});
+
+process.on('uncaughtException', (error: Error, origin: string) => {
+  const stack = error?.stack || String(error);
+  console.error(`🚨 [UncaughtException] Origin: ${origin}. Process kept alive. Stack:\n${stack}`);
+});
+
 import { createServer as createViteServer } from "vite";
 import { sqliteDb } from "./db";
 import { apiRateLimiter, expensiveOpLimiter } from "./middleware/rateLimit";
