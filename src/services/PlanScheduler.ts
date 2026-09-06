@@ -41,13 +41,13 @@ export class PlanScheduler {
       if (!users || users.length === 0) return;
 
       for (const u of users) {
-        try {
-          const chatId = String(u.chat_id);
-          const tz = u.tz || 'Europe/Moscow';
-          
-          // 2. Вычисляй локальное время по timezone пользователя
-          const { timeStr, dateStr } = getLocalTimeAndDate(tz);
+        const chatId = String(u.chat_id);
+        const tz = u.tz || 'Europe/Moscow';
+        
+        // 2. Вычисляй локальное время по timezone пользователя
+        const { timeStr, dateStr } = getLocalTimeAndDate(tz);
 
+        try {
           let slotTimes = { m: '07:30', n: '13:00', e: '21:00' };
           if (u.slot_times) {
             try {
@@ -69,17 +69,24 @@ export class PlanScheduler {
             shortSlot = 'e';
           }
 
-          // 3. Если время совпало со слотом (m/n/e) И сегодня ещё не отправлялось
-          if (!slotKey) continue;
-
-          if (isPlanSlotAlreadySent(chatId, shortSlot, dateStr)) {
+          // 3. Если время не совпало со слотом
+          if (!slotKey) {
+            const logMsg = `[PlanScheduler] юзер=${chatId} локально=${timeStr} отправка=нет/не время слота`;
+            logger.info(logMsg);
+            console.log(logMsg);
             continue;
           }
 
-          // 4. Сборка контента
-          const content = await buildSlotContent(chatId, slotKey);
+          // 4. Проверка: уже отправлялось сегодня
+          if (isPlanSlotAlreadySent(chatId, shortSlot, dateStr)) {
+            const logMsg = `[PlanScheduler] юзер=${chatId} локально=${timeStr} отправка=нет/уже отправлено`;
+            logger.info(logMsg);
+            console.log(logMsg);
+            continue;
+          }
 
-          // 5. Отправка контента
+          // 5. Сборка и отправка контента
+          const content = await buildSlotContent(chatId, slotKey);
           const { modernMaxAdapter } = await import("../../server");
 
           if (u.voice_on === 1) {
@@ -89,14 +96,16 @@ export class PlanScheduler {
             await modernMaxAdapter.sendToUser(chatId, content.text);
           }
 
-          // 6. После отправки пиши в plan_sent_logs
+          // 6. Фиксация в логах отправки
           markPlanSlotSent(chatId, shortSlot, dateStr);
 
-          // Лог: [PlanScheduler] Отправил слот {slot} юзеру {chatId} в {time} {tz}
-          logger.info(`[PlanScheduler] Отправил слот ${shortSlot} юзеру ${chatId} в ${timeStr} ${tz}`);
-
+          const logMsg = `[PlanScheduler] юзер=${chatId} локально=${timeStr} отправка=да/${shortSlot}`;
+          logger.info(logMsg);
+          console.log(logMsg);
         } catch (userErr: any) {
-          logger.error(`❌ [PlanScheduler] Error sending to user ${u.chat_id}:`, userErr.message || userErr);
+          const logMsg = `[PlanScheduler] юзер=${chatId} локально=${timeStr} отправка=нет/ошибка: ${userErr?.message || userErr}`;
+          logger.error(logMsg);
+          console.log(logMsg);
         }
       }
     } catch (err: any) {

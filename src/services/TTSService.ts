@@ -59,10 +59,42 @@ export function preparePlainProsody(text: string): string {
 
 export interface TTSSynthesisOptions {
   voice?: string;
-  rate?: string;
+  rate?: number | string;
   pitch?: string;
   speed?: number; // legacy support
   lang?: string;  // legacy support
+}
+
+/**
+ * Парсер параметра rate в числовой коэффициент скорости (дефолт 0.9 = 10% медленнее для ВСЕХ сообщений)
+ */
+export function parseRate(rate?: number | string, speed?: number, defaultRate: number = 0.9): number {
+  if (typeof rate === 'number' && !isNaN(rate) && rate > 0) {
+    return rate;
+  }
+  if (typeof rate === 'string') {
+    const trimmed = rate.trim();
+    if (trimmed.endsWith('%')) {
+      const val = parseFloat(trimmed.replace('%', ''));
+      if (!isNaN(val) && val > 0) {
+        if (trimmed.startsWith('-')) {
+          return Math.max(0.5, Math.min(2.0, 1.0 - Math.abs(val) / 100));
+        } else if (trimmed.startsWith('+')) {
+          return Math.max(0.5, Math.min(2.0, 1.0 + Math.abs(val) / 100));
+        } else {
+          return Math.max(0.5, Math.min(2.0, val / 100));
+        }
+      }
+    }
+    const val = parseFloat(trimmed);
+    if (!isNaN(val) && val > 0) {
+      return val;
+    }
+  }
+  if (typeof speed === 'number' && !isNaN(speed) && speed > 0) {
+    return speed;
+  }
+  return defaultRate;
 }
 
 /**
@@ -95,22 +127,18 @@ export class TTSService {
       logger.warn("⚠️ [TTS] Female voice detected. Forcing male voice DmitryNeural.");
       voice = 'ru-RU-DmitryNeural';
     }
-    let rate = options.rate;
-    if (!rate && options.speed) {
-      rate = `${Math.round(options.speed * 100)}%`;
-    }
-    if (!rate) {
-      rate = '+0%';
-    } else if (rate === '0.95') {
-      rate = '95%';
-    }
+
+    // Дефолт для ВСЕХ голосовых сообщений rate = 0.9 (10% медленнее)
+    const numRate = parseRate(options.rate, options.speed, 0.9);
+    const edgeRate = numRate;
+    const edgeRateSSML = `${numRate}`;
     const pitch = options.pitch || '+0Hz';
 
     if (!cleanText) {
       return isSelfTest ? this.generateSilentWav() : null;
     }
 
-    const cacheKey = this.getCacheKey(cleanText, voice, rate, pitch);
+    const cacheKey = this.getCacheKey(cleanText, voice, String(edgeRate), pitch);
 
     // 1. Проверка кэша
     if (this.cache.has(cacheKey)) {
@@ -122,7 +150,7 @@ export class TTSService {
       return cached;
     }
 
-    logger.info(`[TTSService] Synthesizing speech (${cleanText.length} chars) via Cascade (Primary: Edge TTS) [Text: "${cleanText}"]`);
+    logger.info(`[TTSService] Synthesizing speech (${cleanText.length} chars) via Cascade (rate: ${numRate}) [Text: "${cleanText}"]`);
     logger.info(`🎙️ [TTS] Text with stress: "${cleanText}"`);
 
     let audioBuffer: Buffer | null = null;
@@ -130,7 +158,7 @@ export class TTSService {
 
     // Попытка 1: MsEdgeTTS library (WebSocket)
     try {
-      audioBuffer = await this.synthesizeWithLibrary(cleanText, voice, rate, pitch);
+      audioBuffer = await this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch);
       if (audioBuffer) {
         contentType = 'audio/mpeg';
         ttsRequestsTotal.inc({ engine: 'edge-library' });
@@ -145,7 +173,7 @@ export class TTSService {
     // Попытка 2: Прямой fetch-SSML к Edge TTS (отказоустойчивый REST)
     if (!audioBuffer) {
       try {
-        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, rate, pitch);
+        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
           ttsRequestsTotal.inc({ engine: 'edge-direct' });
@@ -158,7 +186,39 @@ export class TTSService {
       }
     }
 
-    // Попытка 3: Gemini TTS (фолбэк)
+    // Попытка 3: Google TTS (Google Cloud Text-to-Speech с speakingRate)
+    if (!audioBuffer) {
+      try {
+        audioBuffer = await this.synthesizeWithGoogle(cleanText, numRate);
+        if (audioBuffer) {
+          contentType = 'audio/mpeg';
+          ttsRequestsTotal.inc({ engine: 'google' });
+          if (isSelfTest) {
+            logger.info("🎙️ [TTS] active engine: google");
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`[TTSService] Google TTS failed: ${err?.message || err}`);
+      }
+    }
+
+    // Попытка 4: OpenAI TTS (speed = 0.85 / 0.9)
+    if (!audioBuffer && process.env.OPENAI_API_KEY) {
+      try {
+        audioBuffer = await synthesizeWithOpenAI(cleanText, numRate);
+        if (audioBuffer) {
+          contentType = 'audio/mpeg';
+          ttsRequestsTotal.inc({ engine: 'openai' });
+          if (isSelfTest) {
+            logger.info("🎙️ [TTS] active engine: openai");
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`[TTSService] OpenAI TTS failed: ${err?.message || err}`);
+      }
+    }
+
+    // Попытка 5: Gemini TTS (фолбэк)
     if (!audioBuffer) {
       try {
         audioBuffer = await this.callGeminiTTS(cleanText);
@@ -174,7 +234,7 @@ export class TTSService {
       }
     }
 
-    // Попытка 4: Абсолютный офлайн-фолбэк (валидный WAV) ТОЛЬКО для self-test
+    // Попытка 6: Абсолютный офлайн-фолбэк (валидный WAV) ТОЛЬКО для self-test
     if (!audioBuffer) {
       if (isSelfTest) {
         logger.warn('[TTSService] All Edge TTS attempts failed. Generating offline fallback tone.');
@@ -190,6 +250,48 @@ export class TTSService {
     // Сохранение в кэш
     this.cache.set(cacheKey, { contentType, buffer: audioBuffer });
     return audioBuffer;
+  }
+
+  /**
+   * Синтез через Google TTS (Google Cloud Text-to-Speech API с speakingRate)
+   */
+  public async synthesizeWithGoogle(text: string, speakingRate: number = 0.9): Promise<Buffer | null> {
+    const apiKey = process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+
+    try {
+      const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: { text },
+          voice: {
+            languageCode: 'ru-RU',
+            name: 'ru-RU-Neural2-D',
+            ssmlGender: 'MALE'
+          },
+          audioConfig: {
+            audioEncoding: 'MP3',
+            speakingRate: speakingRate // 0.85 / 0.9
+          }
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (!res.ok) {
+        logger.warn(`⚠️ [TTS] Google TTS status ${res.status}`);
+        return null;
+      }
+
+      const data: any = await res.json();
+      if (data?.audioContent) {
+        return Buffer.from(data.audioContent, 'base64');
+      }
+    } catch (err: any) {
+      logger.warn(`⚠️ [TTS] Google TTS failed: ${err?.message || err}`);
+    }
+    return null;
   }
 
   /**
@@ -243,7 +345,7 @@ export class TTSService {
   /**
    * Синтез через WebSocket библиотеку MsEdgeTTS с нарезкой по границам предложений
    */
-  private async synthesizeWithLibrary(text: string, voice: string, rate: string, pitch: string): Promise<Buffer> {
+  private async synthesizeWithLibrary(text: string, voice: string, rate: number | string, pitch: string): Promise<Buffer> {
     const chunks = chunkText(text, 300);
     const audioChunks: Buffer[] = [];
     const tts = new MsEdgeTTS();
@@ -277,7 +379,7 @@ export class TTSService {
   /**
    * Прямой fetch-SSML к Microsoft Edge Speech API
    */
-  private async synthesizeEdgeDirect(text: string, voice: string, rate: string, pitch: string): Promise<Buffer> {
+  private async synthesizeEdgeDirect(text: string, voice: string, rate: number | string, pitch: string): Promise<Buffer> {
     const chunks = chunkText(text, 300);
     const audioChunks: Buffer[] = [];
 
@@ -377,7 +479,7 @@ export function cleanForVoice(text: string): string {
 /**
  * 2. Синтез через OpenAI TTS (если подключен)
  */
-async function synthesizeWithOpenAI(text: string): Promise<Buffer> {
+export async function synthesizeWithOpenAI(text: string, speed: number = 0.9): Promise<Buffer> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("No OPENAI_API_KEY in environment");
 
@@ -391,7 +493,7 @@ async function synthesizeWithOpenAI(text: string): Promise<Buffer> {
       model: "tts-1",
       voice: "onyx",
       input: text,
-      speed: 1.0
+      speed: speed // speed = 0.85 / 0.9
     })
   });
 
@@ -465,19 +567,20 @@ export async function synthesizeForChat(
     voice = 'ru-RU-DmitryNeural';
   }
 
+  const isHook = (chatId === "global_start_hook") ||
+    text.includes("Здравствуй! Я — Селин") ||
+    text.includes("Здравствуй! Я — Сели\u0301н");
+  const defaultRate = isHook ? 0.85 : 0.9;
+  const numRate = parseRate(options.rate, options.speed, defaultRate);
+  const pitch = options.pitch || '+0Hz';
+
   if (!audioBuffer) {
     engine = 'Edge';
-    const isHook = (chatId === "global_start_hook") ||
-      text.includes("Здравствуй! Я — Селин") ||
-      text.includes("Здравствуй! Я — Сели\u0301н");
-    const rate = options.rate || (isHook ? '95%' : (options.speed ? `${Math.round(options.speed * 100)}%` : '+0%'));
-    const pitch = options.pitch || '+0Hz';
-
     try {
-      audioBuffer = await ttsService.synthesize(normalized, { ...options, voice, rate, pitch }, isSelfTest);
+      audioBuffer = await ttsService.synthesize(normalized, { ...options, voice, rate: numRate, speed: numRate, pitch }, isSelfTest);
       if (audioBuffer) {
-        console.log(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio`);
-        logger.info(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio`);
+        console.log(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio (rate=${numRate})`);
+        logger.info(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio (rate=${numRate})`);
       }
     } catch (fallbackErr: any) {
       logger.error(`❌ [TTS] Edge TTS fallback failed: ${fallbackErr.message || fallbackErr}`);
@@ -494,10 +597,10 @@ export async function synthesizeForChat(
   }
 
   logger.warn(`⚠️ [TTS] Primary male voice DmitryNeural unavailable. Attempting backup male voice synthesis...`);
-  const fallbackBuffer = await ttsService.synthesize(normalized, { voice }, isSelfTest);
+  const fallbackBuffer = await ttsService.synthesize(normalized, { voice, rate: numRate }, isSelfTest);
   if (fallbackBuffer) {
-    console.log(`🎙 [TTS] voice=${voice} gender=male rate=1.0`);
-    logger.info(`🎙 [TTS] voice=${voice} gender=male rate=1.0`);
+    console.log(`🎙 [TTS] voice=${voice} gender=male rate=${numRate}`);
+    logger.info(`🎙 [TTS] voice=${voice} gender=male rate=${numRate}`);
   }
   return fallbackBuffer;
 }

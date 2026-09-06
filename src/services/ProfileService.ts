@@ -209,9 +209,64 @@ if (sqliteDb) {
       logger.error("❌ [Profile] Failed to create idx_user_profiles_plan index:", idxErr);
     }
 
+    // Авто-миграция для всех существующих обычных пользователей: plan_enabled=1, plan_status='on_quiet'
+    try {
+      const OWNER = String(process.env.OWNER_CHAT_ID || '').trim();
+      const existingUsers = sqliteDb.prepare("SELECT chat_id, plan_enabled, plan_status FROM user_profiles").all() as any[];
+      for (const u of existingUsers) {
+        if (OWNER && String(u.chat_id) === OWNER) continue;
+        if (u.plan_enabled !== 1 || u.plan_status === 'off') {
+          sqliteDb.prepare(`
+            UPDATE user_profiles 
+            SET plan_enabled = 1, plan_status = 'on_quiet', voice_on = 1
+            WHERE chat_id = ?
+          `).run(u.chat_id);
+          logger.info(`✨ [Profile] Migration auto-enabled plan for user ${u.chat_id}`);
+        }
+      }
+    } catch (migErr) {
+      logger.warn("⚠️ [Profile] Auto-migration check warning:", migErr);
+    }
+
     logger.info("📁 [Profile] user_profiles and Spirit Core tables verified.");
   } catch (err: any) {
     logger.error("❌ [Profile] Database initialization failed:", err);
+  }
+}
+
+/**
+ * Автоматическое создание/включение Плана Победы для обычного пользователя (chatId != OWNER_CHAT_ID)
+ * plan_enabled = 1, plan_status = 'on_quiet', voice_on = 1, tz = 'Europe/Moscow', slot_times = '{"m":"07:30","n":"13:00","e":"21:00"}'
+ */
+export function ensureNewUserPlanProfile(chatId: string | number): void {
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim();
+  if (!cleanId || !sqliteDb) return;
+
+  const OWNER = String(process.env.OWNER_CHAT_ID || '').trim();
+  const isOwner = OWNER !== '' && cleanId === OWNER;
+  if (isOwner) return; // Управление только у владельца, профиль владельца не трогаем
+
+  const nowStr = new Date().toISOString();
+  const defaultSlotTimes = JSON.stringify({ m: "07:30", n: "13:00", e: "21:00" });
+
+  try {
+    const row = sqliteDb.prepare("SELECT chat_id, plan_enabled, plan_status FROM user_profiles WHERE chat_id = ?").get(cleanId) as any;
+    if (!row) {
+      sqliteDb.prepare(`
+        INSERT INTO user_profiles (chat_id, plan_enabled, plan_status, tz, slot_times, voice_on, recent_motivations, plan_day_offset, briefing_enabled, updated_at)
+        VALUES (?, 1, 'on_quiet', 'Europe/Moscow', ?, 1, '[]', 0, 1, ?)
+      `).run(cleanId, defaultSlotTimes, nowStr);
+      logger.info(`✨ [Profile] Auto-created plan profile for new user ${cleanId}: plan_enabled=1, plan_status=on_quiet, voice_on=1`);
+    } else if (row.plan_enabled !== 1 || row.plan_status === 'off') {
+      sqliteDb.prepare(`
+        UPDATE user_profiles
+        SET plan_enabled = 1, plan_status = 'on_quiet', voice_on = 1, tz = COALESCE(tz, 'Europe/Moscow'), slot_times = COALESCE(slot_times, ?), updated_at = ?
+        WHERE chat_id = ?
+      `).run(defaultSlotTimes, nowStr, cleanId);
+      logger.info(`✨ [Profile] Auto-enabled plan for user ${cleanId}: plan_enabled=1, plan_status=on_quiet, voice_on=1`);
+    }
+  } catch (err) {
+    logger.warn(`⚠️ [Profile] Failed to ensure plan profile for ${cleanId}:`, err);
   }
 }
 
@@ -242,16 +297,31 @@ export function getUserSettings(chatId: string | number): UserSettings {
 }
 
 export function getUserPlanConfig(chatId: string | number): UserPlanConfig {
-  const cleanId = String(chatId).replace(/^[a-z_]+/, '');
-  const defaults: UserPlanConfig = {
-    plan_enabled: 0,
-    plan_status: 'off',
-    tz: 'Europe/Moscow',
-    slot_times: { m: '07:30', n: '13:00', e: '21:00' },
-    voice_on: 1,
-    recent_motivations: [],
-    plan_day_offset: 0
-  };
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim();
+  const OWNER = String(process.env.OWNER_CHAT_ID || '').trim();
+  const isOwner = OWNER !== '' && cleanId === OWNER;
+
+  // Обычный юзер: план включён автоматически (plan_enabled=1, plan_status='on_quiet')
+  // Владелец: стандартные дефолты с возможностью ручного управления
+  const defaults: UserPlanConfig = isOwner
+    ? {
+        plan_enabled: 0,
+        plan_status: 'off',
+        tz: 'Europe/Moscow',
+        slot_times: { m: '07:30', n: '13:00', e: '21:00' },
+        voice_on: 1,
+        recent_motivations: [],
+        plan_day_offset: 0
+      }
+    : {
+        plan_enabled: 1,
+        plan_status: 'on_quiet',
+        tz: 'Europe/Moscow',
+        slot_times: { m: '07:30', n: '13:00', e: '21:00' },
+        voice_on: 1,
+        recent_motivations: [],
+        plan_day_offset: 0
+      };
 
   if (!sqliteDb) return defaults;
   try {
@@ -272,14 +342,16 @@ export function getUserPlanConfig(chatId: string | number): UserPlanConfig {
       }
 
       return {
-        plan_enabled: row.plan_enabled !== null && row.plan_enabled !== undefined ? Number(row.plan_enabled) : (row.plan_status && row.plan_status !== 'off' ? 1 : 0),
-        plan_status: (row.plan_status as PlanStatus) || 'off',
+        plan_enabled: row.plan_enabled !== null && row.plan_enabled !== undefined ? Number(row.plan_enabled) : (isOwner ? (row.plan_status && row.plan_status !== 'off' ? 1 : 0) : 1),
+        plan_status: (row.plan_status as PlanStatus) || (isOwner ? 'off' : 'on_quiet'),
         tz: row.tz || 'Europe/Moscow',
         slot_times,
         voice_on: row.voice_on !== null && row.voice_on !== undefined ? Number(row.voice_on) : 1,
         recent_motivations,
         plan_day_offset: row.plan_day_offset !== null && row.plan_day_offset !== undefined ? Number(row.plan_day_offset) : 0
       };
+    } else if (!isOwner) {
+      ensureNewUserPlanProfile(cleanId);
     }
   } catch (err) {
     logger.warn(`⚠️ [Profile] Failed to get plan config for ${cleanId}:`, err);

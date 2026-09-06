@@ -904,7 +904,7 @@ export class MaxAdapter {
     if (!voiceSent) {
       try {
         const { synthesizeForChat } = await import("../services/TTSService");
-        audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { rate: "95%", speed: 0.95 });
+        audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { voice: "ru-RU-DmitryNeural", rate: 0.85, speed: 0.85 });
         if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
           voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
         }
@@ -1039,6 +1039,17 @@ export class MaxAdapter {
       console.log(`🔐 [Auth] sender=${sender} owner=${OWNER} match=${isOwnerSender}`);
       logger.info(`🔐 [Auth] sender=${sender} owner=${OWNER} match=${isOwnerSender}`);
 
+      // 🕊 [План Победы] Для нового юзера (chatId != OWNER_CHAT_ID) сразу создаём профиль с:
+      // plan_enabled = 1, plan_status = 'on_quiet', voice_on = 1, tz = 'Europe/Moscow', slot_times = '{"m":"07:30","n":"13:00","e":"21:00"}'
+      if (!isOwnerSender && cleanId) {
+        try {
+          const { ensureNewUserPlanProfile } = await import("../services/ProfileService");
+          ensureNewUserPlanProfile(cleanId);
+        } catch (profErr) {
+          logger.warn(`⚠️ [Profile] Failed to ensure plan profile for ${cleanId}:`, profErr);
+        }
+      }
+
       let text = '';
       let callbackData = raw.callback_data || raw.payload?.callback_data || raw.body?.callback_data || raw.message?.callback_data || raw.payload?.data || raw.body?.data || raw.body?.payload?.callback_data || raw.message?.body?.callback_data || raw.callback?.payload || raw.callback?.callback_data || raw.callback?.data;
       if (!callbackData && raw.payload && typeof raw.payload === 'object' && typeof raw.payload.payload === 'string') {
@@ -1116,7 +1127,7 @@ export class MaxAdapter {
         if (!voiceSent) {
           try {
             const { synthesizeForChat } = await import("../services/TTSService");
-            audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { rate: "95%", speed: 0.95 });
+            audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { voice: "ru-RU-DmitryNeural", rate: 0.85, speed: 0.85 });
             if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
               voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
             }
@@ -1484,9 +1495,39 @@ export class MaxAdapter {
       }
 
       // === ПЕРЕХВАТ ВОПРОСОВ О ПЛАНЕ ПОБЕДЫ ДО LLM ===
+      const isPlanSettingsCommand =
+        lowerText === 'настройки план победы' ||
+        lowerText === 'настройки плана победы' ||
+        lowerText === 'план победы настройки' ||
+        lowerText === 'настройки плана' ||
+        lowerText === '⚙️ план победы';
+
+      if (isPlanSettingsCommand) {
+        if (!isOwnerSender) {
+          logger.info(`🔒 [Plan] Non-owner ${cleanId} attempted plan settings command - ignored`);
+          return res.status(200).send('ok');
+        }
+        const { renderPlanMenu } = await import("../services/CallbackRouter");
+        const menu = renderPlanMenu(cleanId);
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, menu.text);
+        }
+        await this.safeSendMessageToChat(cleanId, menu.text, menu.extra);
+        return res.status(200).send('ok');
+      }
+
       const isPlanQuestion = lowerText === 'план победы' || lowerText === 'план_победы' || lowerText === '/plan';
       if (isPlanQuestion) {
         logger.info(`❓ [Intent] fn=plan chat=${cleanId}`);
+
+        if (!isOwnerSender) {
+          // Обычный пользователь: просто отправляем текущий слот (текст + голос) без меню и кнопок
+          const { sendCurrentPlanSlot } = await import("../services/bibleCommands");
+          await sendCurrentPlanSlot(cleanId, isVoiceInput);
+          return res.status(200).send('ok');
+        }
+
+        // Владелец: управление, кнопки и меню
         const { getUserPlanConfig } = await import("../services/ProfileService");
         const cfg = getUserPlanConfig(cleanId);
 

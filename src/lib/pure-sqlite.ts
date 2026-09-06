@@ -208,7 +208,7 @@ export class PureDatabase {
       },
 
       get: (...params: any[]) => {
-        if (upper === "SELECT 1") return { 1: 1 };
+        if (upper.startsWith("SELECT 1")) return { 1: 1, alive: 1 };
 
         const match = cleanSql.match(/SELECT\s+(.+?)\s+FROM\s+([a-zA-Z0-9_]+)(?:\s+WHERE\s+(.+?))?$/i);
         if (match) {

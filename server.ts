@@ -283,6 +283,11 @@ async function startServer() {
         console.log(`🚑 [Fix] emergency activation: ${clientChatId} month`);
         logger.info(`🚑 [Fix] emergency activation: ${clientChatId} month`);
       }
+
+      const { ensureNewUserPlanProfile } = await import("./src/services/ProfileService");
+      ensureNewUserPlanProfile(clientChatId);
+      console.log(`🕊 [Fix] Auto-enabled Victory Plan for client ${clientChatId}`);
+      logger.info(`🕊 [Fix] Auto-enabled Victory Plan for client ${clientChatId}`);
     } catch (emErr) {
       logger.error("❌ Error running emergency activation:", emErr);
     }

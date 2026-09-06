@@ -331,7 +331,7 @@ export function setVoiceGender(chatId: string | number, gender: 'male' | 'female
 export function getVoiceConfig(chatId?: string | number | null): { voice: string; rate: string; pitch: string; gender: 'male' | 'female' } {
   return {
     voice: 'ru-RU-DmitryNeural',
-    rate: '+0%',
+    rate: '-10%',
     pitch: '+0Hz',
     gender: 'male'
   };

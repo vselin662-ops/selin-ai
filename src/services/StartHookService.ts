@@ -63,13 +63,32 @@ export async function getStartHookAudio(): Promise<Buffer | null> {
   return null;
 }
 
+async function getBufferDurationSec(buffer: Buffer): Promise<number> {
+  try {
+    const { exec } = await import("child_process");
+    const util = await import("util");
+    const execAsync = util.promisify(exec);
+    const os = await import("os");
+    const path = await import("path");
+    const fs = await import("fs");
+    const tmpFile = path.join(os.tmpdir(), `probe_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.mp3`);
+    await fs.promises.writeFile(tmpFile, buffer);
+    const { stdout } = await execAsync(`ffprobe -i "${tmpFile}" -show_entries format=duration -v quiet -of csv="p=0"`);
+    await fs.promises.unlink(tmpFile).catch(() => {});
+    const dur = parseFloat(stdout.trim());
+    return isNaN(dur) ? 0 : Math.round(dur * 100) / 100;
+  } catch (_) {
+    return 0;
+  }
+}
+
 /**
  * Пересоздание аудио приветствия:
  * 1. Удаляет старый assets/start_hook.mp3
  * 2. Сбрасывает in-memory кэш ([StartHook] cached in memory)
- * 3. Синтезирует заново с живой интонацией: rate = 0.95 (prosody rate="95%"), pitch стандартный ("+0Hz")
+ * 3. Синтезирует заново с мужским спокойным голосом (ru-RU-DmitryNeural), rate = 0.85, pitch стандартный ("+0Hz")
  * 4. Сохраняет в assets и обновляет кэш
- * Лог: [StartHook] приветствие пересоздано
+ * Лог: [StartHook] приветствие пересоздано, длительность {N} сек.
  */
 export async function recreateStartHookAudio(): Promise<Buffer | null> {
   try {
@@ -93,11 +112,11 @@ export async function recreateStartHookAudio(): Promise<Buffer | null> {
     const { ttsService } = await import("./TTSService");
     ttsService.clearCache();
 
-    // 5. Синтез заново с настройками чёткости: rate = 0.95, prosody rate="95%", pitch стандартный
+    // 5. Синтез заново с настройками чёткости: rate = 0.85, голос мужской спокойный ru-RU-DmitryNeural
     const synth = await ttsService.synthesize(VOICE_HOOK_TEXT, {
       voice: "ru-RU-DmitryNeural",
-      rate: "95%",
-      speed: 0.95,
+      rate: 0.85,
+      speed: 0.85,
       pitch: "+0Hz"
     });
 
@@ -116,8 +135,10 @@ export async function recreateStartHookAudio(): Promise<Buffer | null> {
         }
       } catch (_) {}
 
-      console.log("[StartHook] приветствие пересоздано");
-      logger.info("[StartHook] приветствие пересоздано");
+      const durationSec = await getBufferDurationSec(synth);
+      const logMsg = `[StartHook] приветствие пересоздано, длительность ${durationSec} сек.`;
+      console.log(logMsg);
+      logger.info(logMsg);
       console.log("🎙️ [StartHook] cached in memory");
       logger.info("🎙️ [StartHook] cached in memory");
 

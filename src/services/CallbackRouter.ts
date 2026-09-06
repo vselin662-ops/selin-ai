@@ -1,5 +1,6 @@
 import { sqliteDb } from "../../db";
 import { logger } from "../logger";
+import { isOwner } from "../fintech/subscriptions";
 import {
   getUserBriefingConfig,
   updateUserBriefingConfig,
@@ -42,6 +43,33 @@ export async function handleTextCommand(
   const cleanId = String(chatId).replace(/^[a-z_]+/, '');
   const trimmed = (rawText || '').trim();
   const lower = trimmed.toLowerCase();
+
+  // Если обычный пользователь (chatId != OWNER_CHAT_ID)
+  if (!isOwner(cleanId)) {
+    // На текст "план победы" от обычного юзера — просто отправить текущий слот (как будто он попросил почитать), без меню
+    if (lower === 'план победы' || lower === 'план_победы' || lower === '/plan') {
+      const { sendCurrentPlanSlot } = await import("./bibleCommands");
+      await sendCurrentPlanSlot(cleanId, isVoiceInput);
+      return { handled: true, replyText: '' };
+    }
+
+    // Команды управления и настройки Плана Победы обычным юзерам НЕ показывать и НЕ обрабатывать
+    if (
+      lower === '⚙️ план победы' ||
+      lower === 'план победы настройки' ||
+      lower === 'настройки план победы' ||
+      lower === 'настройки плана' ||
+      lower === 'включить план победы' ||
+      lower === 'включить план' ||
+      lower === 'отключить план победы' ||
+      lower === 'выключить план победы' ||
+      lower === 'стоп план победы' ||
+      lower === 'голос вкл' ||
+      lower === 'голос выкл'
+    ) {
+      return null;
+    }
+  }
 
   let action: string | null = null;
 
@@ -302,6 +330,27 @@ export async function handleCallback(
   // 1. Обязательный лог нажатия кнопки
   console.log(`🔘 [BTN] mode=callback p=${payload}`);
   logger.info(`🔘 [BTN] mode=callback p=${payload}`);
+
+  // Кнопки настроек Плана Победы обычным юзерам НЕ обрабатывать (управление только у владельца)
+  const isPlanCallback = 
+    lower.startsWith('plan_') ||
+    lower === 'оставить как есть' ||
+    lower === 'включить план победы' ||
+    lower === 'включить план' ||
+    lower === 'отключить план победы' ||
+    lower === 'выключить план победы' ||
+    lower === 'стоп план победы' ||
+    lower === '⚙️ план победы' ||
+    lower === 'настройки плана' ||
+    lower === 'план победы настройки';
+
+  if (isPlanCallback && !isOwner(cleanId)) {
+    logger.warn(`🔒 [CallbackRouter] Non-owner ${cleanId} attempted plan callback: ${payload} - blocked`);
+    return {
+      handled: true,
+      replyText: ''
+    };
+  }
 
   // === 2. БРИФИНГ ===
   if (

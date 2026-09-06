@@ -15,6 +15,44 @@ import {
   sendPlanSlotToUser
 } from "./bibleService";
 
+/**
+ * Отправка текущего слота Плана Победы обычному пользователю (без меню и кнопок)
+ */
+export async function sendCurrentPlanSlot(
+  chatId: string | number,
+  isVoice: boolean = false
+): Promise<void> {
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim();
+  const config = getUserPlanConfig(cleanId);
+  const nowTime = new Date();
+  const hour = parseInt(new Intl.DateTimeFormat('ru-RU', { timeZone: config.tz || 'Europe/Moscow', hour: '2-digit', hour12: false }).format(nowTime), 10);
+
+  let slotKey: 'morning' | 'noon' | 'evening' = 'morning';
+  if (hour >= 12 && hour < 18) slotKey = 'noon';
+  else if (hour >= 18) slotKey = 'evening';
+
+  try {
+    const { buildSlotContent } = await import("./PlanContentBuilder");
+    const { modernMaxAdapter } = await import("../../server");
+
+    const content = await buildSlotContent(cleanId, slotKey);
+
+    // Текстовое сообщение без кнопок и меню
+    await modernMaxAdapter.sendToUser(cleanId, content.text);
+
+    // Голосовое сообщение
+    if (config.voice_on !== 0 || isVoice) {
+      try {
+        await modernMaxAdapter.sendVoice(cleanId, content.voiceText);
+      } catch (vErr) {
+        logger.warn(`⚠️ [Plan] Failed to send voice slot to ${cleanId}:`, vErr);
+      }
+    }
+  } catch (err: any) {
+    logger.error(`❌ [Plan] Error sending current slot to ${cleanId}:`, err?.message || err);
+  }
+}
+
 export async function handleBibleSubscription(
   chatId: string | number,
   text: string,
@@ -84,8 +122,10 @@ export async function handleBibleSubscription(
     }
   }
 
-  // === ЗАДАЧА 3: Текстовые команды ===
+  // === Текстовые команды управления (ТОЛЬКО ВЛАДЕЛЕЦ) ===
   if (lower === 'включить план победы' || lower === 'включить план' || lower === 'plan_on' || lower === '/plan_on') {
+    if (!isOwner(cleanId)) return null; // Обычным юзерам ничего нажимать не нужно, включено автоматически
+
     updateUserPlanConfig(cleanId, { plan_enabled: 1, plan_status: 'on_buttons' });
     try {
       sqliteDb?.prepare("INSERT OR REPLACE INTO bible_subs (chat_id, start_date, active, period_days) VALUES (?, ?, ?, ?)")
@@ -96,6 +136,8 @@ export async function handleBibleSubscription(
   }
 
   if (lower === 'отключить план победы' || lower === 'выключить план победы' || lower === 'stop_plan' || lower === 'plan_off' || lower === '/plan_off') {
+    if (!isOwner(cleanId)) return null; // Обычным юзерам команды отключения не обрабатывать
+
     updateUserPlanConfig(cleanId, { plan_enabled: 0, plan_status: 'off' });
     try {
       sqliteDb?.prepare("UPDATE bible_subs SET active = 0 WHERE chat_id = ?").run(cleanId);
@@ -104,6 +146,8 @@ export async function handleBibleSubscription(
   }
 
   if (lower === 'настройки план победы' || lower === 'настройки плана победы' || lower === 'план победы настройки') {
+    if (!isOwner(cleanId)) return null; // Обычным юзерам меню настроек не показывать и не обрабатывать
+
     try {
       const { renderPlanMenu } = await import("./CallbackRouter");
       const menu = renderPlanMenu(cleanId);
@@ -160,10 +204,18 @@ export async function handleBibleSubscription(
     return null; // от не-владельца -> игнор
   }
 
-  // === ЗАДАЧА 1: Упрощённое меню (при команде "план победы") ===
+  // === КОМАНДА "план победы" ===
   const isPlanQuestion = lower === 'план победы' || lower === 'план_победы' || lower === '/plan';
   if (isPlanQuestion) {
     logger.info(`❓ [Intent] fn=plan chat=${cleanId}`);
+
+    // Обычный юзер: просто отправить текущий слот (как будто попросил почитать), без меню и кнопок
+    if (!isOwner(cleanId)) {
+      await sendCurrentPlanSlot(cleanId, isVoice);
+      return "[HANDLED_WITH_BUTTONS]";
+    }
+
+    // Владелец: полное меню и кнопки
     const cfg = getUserPlanConfig(cleanId);
     const isEnabled = (cfg.plan_status === 'on_buttons' || cfg.plan_status === 'on_quiet' || cfg.plan_enabled === 1) && cfg.plan_status !== 'off';
     const statusStr = isEnabled ? 'включён' : 'выключен';
