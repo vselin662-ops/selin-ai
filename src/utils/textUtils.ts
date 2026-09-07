@@ -396,7 +396,7 @@ export function normalizeNumeralsAndPrepositions(text: string): string {
 /**
  * Очистка и фонетическая оптимизация текста перед озвучкой в TTS
  */
-export function sanitizeForTTS(text: string): string {
+export function sanitizeForTTS(text: string, skipStress: boolean = false): string {
   if (!text) return "";
 
   // Нормализуем числительные и предлоги в самом начале
@@ -431,7 +431,9 @@ export function sanitizeForTTS(text: string): string {
   cleaned = cleaned.replace(/\bвовеки\b/gi, 'во веки');
 
   // 6. Ударения из STRESS_DICT (U+0301)
-  cleaned = applyStress(cleaned);
+  if (!skipStress) {
+    cleaned = applyStress(cleaned);
+  }
 
   // 7. Убирает двойные пробелы и лишние символы
   cleaned = cleaned.replace(/\s+/g, ' ');

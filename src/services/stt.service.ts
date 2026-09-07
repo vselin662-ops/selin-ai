@@ -14,7 +14,32 @@ export class STTService {
   public async transcribe(audioBuffer: Buffer, language: string = 'ru'): Promise<string> {
     const key = process.env.GROQ_API_KEY;
     if (!key) {
-      logger.warn('[STTService] GROQ_API_KEY is not defined.');
+      logger.warn('[STTService] GROQ_API_KEY is not defined. Checking GEMINI_API_KEY as fallback...');
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (geminiKey) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: geminiKey });
+          const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [
+              {
+                inlineData: {
+                  data: audioBuffer.toString('base64'),
+                  mimeType: 'audio/mp3'
+                }
+              },
+              'Транскрибируй эту аудиозапись на русском языке дословно, без комментариев и примечаний.'
+            ]
+          });
+          const text = response.text || '';
+          return text.trim();
+        } catch (geminiErr: any) {
+          logger.error(`[STTService] Gemini fallback transcription failed: ${geminiErr?.message || geminiErr}`);
+          return '';
+        }
+      }
+      logger.warn('[STTService] Neither GROQ_API_KEY nor GEMINI_API_KEY is defined.');
       return '';
     }
 

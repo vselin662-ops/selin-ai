@@ -1,9 +1,26 @@
 import { logger } from "../logger";
 
-export const HOOK_TEXT = `Здравствуйте! Я Селин — ваш голосовой помощник. Буду рад помочь: собрать заказ, почитать Библию по Плану Победы, напомнить о важном или просто поддержать беседу. Подскажите, с чего начнём?`;
+export const HOOK_TEXT = `Здравствуйте! Меня зовут Селин. Я ваш голосовой помощник и собеседник. Я живу здесь, в этом чате, и работаю для вас круглые сутки. Со мной можно просто поговорить по душам. Я помогу собрать заказ к ужину и посчитаю, сколько это стоит. Я прочитаю вам План Победы на сегодня и помолчу рядом, когда нужно молчание. Я напомню о важном и не дам забыть о главном. А ещё я умею слушать. Просто напишите мне или скажите голосом. Подскажите, с чего мы начнём нашу беседу?`;
 
-// Текст для голосового синтеза с комбинируемым акутом U+0301 на ударных гласных
-export const VOICE_HOOK_TEXT = `Здра\u0301вствуйте! Я Сели\u0301н — ваш голосово\u0301й помо\u0301щник. Бу\u0301ду рад помо\u0301чь: собра\u0301ть зака\u0301з, почита\u0301ть Би\u0301блию по Пла\u0301ну Побе\u0301ды, напо\u0301мнить о ва\u0301жном и\u0301ли про\u0301сто поддержа\u0301ть бесе\u0301ду. Подскажи\u0301те, с чего\u0301 начнём?`;
+export const VOICE_HOOK_TEXT = HOOK_TEXT;
+
+export function sanitizeStartHookText(text: string): string {
+  if (!text) return "";
+  
+  // 1. Remove combining acute accents (\u0301), other acute accents (´), grave accents (`), and plus signs (+)
+  let cleaned = text;
+  cleaned = cleaned.replace(/\u0301/g, "");
+  cleaned = cleaned.replace(/[\u0300-\u036F]/g, "");
+  cleaned = cleaned.replace(/[´`'+]/g, "");
+  
+  // 2. Keep ONLY letters (Russian & English), spaces, commas, periods, exclamation points, and question marks
+  cleaned = cleaned.replace(/[^a-zA-Zа-яА-ЯёЁ\s,.\!?]/g, " ");
+  
+  // 3. Normalize spaces
+  cleaned = cleaned.replace(/\s+/g, " ");
+  
+  return cleaned.trim();
+}
 
 export let START_HOOK_AUDIO: Buffer | null = null;
 
@@ -100,22 +117,31 @@ export async function recreateStartHookAudio(): Promise<Buffer | null> {
     const { ttsService } = await import("./TTSService");
     ttsService.clearCache();
 
-    // 5. Синтез заново с настройками чёткости: rate = 0.9, голос мужской спокойный ru-RU-DmitryNeural
-    const synth = await ttsService.synthesize(VOICE_HOOK_TEXT, {
+    // 5. Очистка и лог точной tts_string
+    const tts_string = sanitizeStartHookText(HOOK_TEXT);
+    const logTtsStr = `[StartHook] tts_string=${tts_string}`;
+    console.log(logTtsStr);
+    logger.info(logTtsStr);
+
+    // 6. Синтез заново с настройками чёткости: rate = 0.85, голос мужской спокойный ru-RU-DmitryNeural
+    const synth = await ttsService.synthesize(tts_string, {
       voice: "ru-RU-DmitryNeural",
-      rate: 0.9,
-      speed: 0.9,
-      pitch: "+0Hz"
+      rate: 0.85,
+      speed: 0.85,
+      pitch: "+0Hz",
+      isStartHook: true,
+      skipStress: true
     });
 
     if (synth && synth.length > 0) {
       START_HOOK_AUDIO = synth;
 
-      // 6. Сохраняем в assets
+      // 7. Сохраняем в assets
       await saveCachedStaticAudio(HOOK_TEXT, synth);
       await saveCachedStaticAudio(VOICE_HOOK_TEXT, synth);
+      await saveCachedStaticAudio(tts_string, synth);
 
-      // 7. Сохраняем в Redis при доступности
+      // 8. Сохраняем в Redis при доступности
       try {
         const { redisService } = await import("./RedisService");
         if (redisService.isAvailable()) {

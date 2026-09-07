@@ -57,12 +57,29 @@ export function preparePlainProsody(text: string): string {
   return processed;
 }
 
+export function prepareStartHookSSML(text: string): string {
+  let escaped = escapeXml(text);
+  // Add 350ms break after sentences
+  escaped = escaped.replace(/(?<!\d)([.!?])(?!\d)/g, '$1 <break time="350ms"/>');
+  // Add a short break (150ms) after commas for natural cadence
+  escaped = escaped.replace(/,/g, ', <break time="150ms"/>');
+  return escaped;
+}
+
+export function prepareStartHookProsody(text: string): string {
+  // MsEdgeTTS library uses websocket plain-text mode. XML break tags will crash the socket.
+  // Standard periods and commas provide perfect natural pauses automatically.
+  return text;
+}
+
 export interface TTSSynthesisOptions {
   voice?: string;
   rate?: number | string;
   pitch?: string;
   speed?: number; // legacy support
   lang?: string;  // legacy support
+  skipStress?: boolean;
+  isStartHook?: boolean;
 }
 
 /**
@@ -120,7 +137,7 @@ export class TTSService {
    * Основной метод синтеза речи. Возвращает готовый бинарный Buffer или null при ошибке.
    */
   public async synthesize(text: string, options: TTSSynthesisOptions = {}, isSelfTest: boolean = false): Promise<Buffer | null> {
-    const sanitizedText = sanitizeForTTS(text);
+    const sanitizedText = sanitizeForTTS(text, options.skipStress);
     const cleanText = sanitizedText.trim();
     let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
     if (voice.toLowerCase().includes('svetlana') || voice.toLowerCase().includes('female')) {
@@ -158,7 +175,7 @@ export class TTSService {
 
     // Попытка 1: MsEdgeTTS library (WebSocket)
     try {
-      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch);
+      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
       });
@@ -177,7 +194,7 @@ export class TTSService {
     // Попытка 2: Прямой fetch-SSML к Edge TTS (отказоустойчивый REST)
     if (!audioBuffer) {
       try {
-        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch);
+        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
           ttsRequestsTotal.inc({ engine: 'edge-direct' });
@@ -351,7 +368,7 @@ export class TTSService {
   /**
    * Синтез через WebSocket библиотеку MsEdgeTTS с нарезкой по границам предложений
    */
-  private async synthesizeWithLibrary(text: string, voice: string, rate: number | string, pitch: string): Promise<Buffer> {
+  private async synthesizeWithLibrary(text: string, voice: string, rate: number | string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
     const chunks = chunkText(text, 300);
     const audioChunks: Buffer[] = [];
     const tts = new MsEdgeTTS();
@@ -359,7 +376,7 @@ export class TTSService {
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
-      const plainChunk = preparePlainProsody(chunk);
+      const plainChunk = isStartHook ? prepareStartHookProsody(chunk) : preparePlainProsody(chunk);
       const streamRes = tts.toStream(plainChunk, { rate, pitch });
       const readable = (streamRes && (streamRes as any).audioStream) ? (streamRes as any).audioStream : streamRes;
 
@@ -385,7 +402,7 @@ export class TTSService {
   /**
    * Прямой fetch-SSML к Microsoft Edge Speech API
    */
-  private async synthesizeEdgeDirect(text: string, voice: string, rate: number | string, pitch: string): Promise<Buffer> {
+  private async synthesizeEdgeDirect(text: string, voice: string, rate: number | string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
     const chunks = chunkText(text, 300);
     const audioChunks: Buffer[] = [];
 
@@ -396,7 +413,7 @@ export class TTSService {
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
-      const ssmlChunk = prepareSSMLText(chunk);
+      const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk);
       const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}'>${ssmlChunk}</prosody></voice></speak>`;
 
       const response = await fetch('https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4', {
