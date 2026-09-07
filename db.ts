@@ -379,7 +379,7 @@ export function getVoiceConfig(chatId?: string | number | null): { voice: string
   if (gender === 'female') {
     return {
       voice: 'ru-RU-SvetlanaNeural',
-      rate: '0.95',
+      rate: '1.1',
       pitch: '+0Hz',
       gender: 'female'
     };

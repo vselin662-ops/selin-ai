@@ -566,9 +566,9 @@ export class MaxAdapter {
   /**
    * Генерация фото / изображений по запросу пользователя (Gemini Image Generation / Pollinations.ai)
    */
-  public async generateAndSendImage(cleanId: string, userPrompt: string, isVoiceInput: boolean = false): Promise<boolean> {
+  public async generateAndSendImage(cleanId: string, userPrompt: string, isVoiceInput: boolean = false, customCaption?: string): Promise<boolean> {
     const enrichedPrompt = `${userPrompt}, high quality, detailed`;
-    const caption = `🎨 Готово! ${userPrompt}`;
+    const caption = customCaption || `🎨 Готово! ${userPrompt}`;
     const cleanIdStr = String(cleanId).replace(/^[a-z_]+/, '');
     const numericId = parseInt(cleanIdStr, 10);
 
@@ -684,6 +684,151 @@ export class MaxAdapter {
       } else {
         await this.safeSendMessageToChat(cleanId, errMsg);
       }
+      return false;
+    }
+  }
+
+  /**
+   * Генерация профессиональных презентаций по запросу пользователя (Selin_AI PRO)
+   */
+  public async handlePresentationRequest(
+    cleanId: string,
+    text: string,
+    dataUrl: string | null,
+    isVoiceInput: boolean
+  ): Promise<boolean> {
+    try {
+      const { PresentationService } = await import("../services/presentationService");
+      
+      let styleGuide;
+      if (dataUrl) {
+        const statusMsg = '🎨 Обнаружен референсный слайд. Анализирую стиль оформления...';
+        await this.safeSendMessageToChat(cleanId, statusMsg);
+        styleGuide = await PresentationService.analyzeStyleFromImage(dataUrl);
+      } else {
+        styleGuide = {
+          style: 'корпоративный минимализм',
+          colors: ['темно-синий', 'белый', 'золотой акцент'],
+          layout: 'заголовок + тезисы слева, визуал 16:9 справа',
+          graphics: 'фото и векторные бизнес-иконки'
+        };
+      }
+
+      const prepMsg = `📊 Создаю профессиональную структуру презентации по вашему запросу...\n\n` +
+        `• Выбранный стиль: ${styleGuide.style}\n` +
+        `• Цветовая гамма: ${styleGuide.colors.join(', ')}\n` +
+        `• Графика: ${styleGuide.graphics}`;
+        
+      await this.safeSendMessageToChat(cleanId, prepMsg);
+
+      const presentation = await PresentationService.generatePlan(text || "Презентация на общую тему", styleGuide);
+      
+      const planAnnounce = `✅ План из ${presentation.slides.length} слайдов успешно разработан! Начинаю генерацию визуалов и наполнения...`;
+      await this.safeSendMessageToChat(cleanId, planAnnounce);
+
+      for (const slide of presentation.slides) {
+        const slideText = `🖥️ СЛАЙД ${slide.slideNumber} из ${presentation.slides.length}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `📌 *${slide.title}*\n\n` +
+          slide.bullets.map(b => `• ${b}`).join('\n') + `\n\n` +
+          `💡 *Пояснение дизайнера:* ${slide.comment}`;
+
+        // Отправляем слайд
+        await this.generateAndSendImage(cleanId, slide.visualPrompt, false, slideText);
+        // Небольшая пауза между слайдами для комфортного чтения
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      const completeMsg = `🎉 Создание презентации на тему "${text}" успешно завершено! Все слайды сгенерированы в формате 16:9. Вы можете скопировать тексты и использовать полученные визуалы.`;
+      if (isVoiceInput) {
+        await this.synthesizeAndSendVoice(cleanId, completeMsg);
+      } else {
+        await this.safeSendMessageToChat(cleanId, completeMsg);
+      }
+
+      return true;
+    } catch (err: any) {
+      logger.error(`❌ [MaxAdapter] Ошибка генерации презентации: ${err?.message || err}`);
+      await this.safeSendMessageToChat(cleanId, `⚠️ Произошла ошибка при генерации презентации: ${err?.message || err}. Пожалуйста, попробуйте еще раз!`);
+      return false;
+    }
+  }
+
+  /**
+   * Озвучка книг и управление процессом чтения (Selin_AI)
+   */
+  public async handleBookNarrationRequest(
+    cleanId: string,
+    text: string,
+    isVoiceInput: boolean
+  ): Promise<boolean> {
+    try {
+      const { BookNarrationService } = await import("../services/BookNarrationService");
+      
+      const lowerText = text.toLowerCase().trim();
+      const activeState = BookNarrationService.getState(cleanId);
+
+      // Вариант А: Ответ на вопрос "Продолжаем?"
+      const isPositiveAnswer = lowerText === 'да' || lowerText === 'продолжаем' || lowerText === 'давай' || lowerText === 'давай продолжим' || lowerText === 'продолжить';
+      if (activeState && activeState.isActive && isPositiveAnswer) {
+        const nextChapter = activeState.currentChapter + 1;
+        const chapterText = await BookNarrationService.getChapterText(activeState.bookTitle, activeState.bookAuthor, nextChapter);
+        if (chapterText) {
+          BookNarrationService.saveState(cleanId, activeState.bookTitle, activeState.bookAuthor, nextChapter, true);
+          // Всегда отправляем и текстом, и голосом
+          await this.safeSendMessageToChat(cleanId, chapterText);
+          await this.synthesizeAndSendVoice(cleanId, chapterText);
+          
+          // Небольшая задержка перед вопросом "Продолжаем?"
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          await this.safeSendMessageToChat(cleanId, "Продолжаем?");
+        } else {
+          // Книга закончилась
+          await this.safeSendMessageToChat(cleanId, "Вы прослушали последнюю доступную главу. Книга успешно завершена!");
+          BookNarrationService.clearState(cleanId);
+        }
+        return true;
+      }
+
+      // Вариант Б: Запрос на новую книгу
+      const isNewRequest = lowerText.includes('озвучь') || lowerText.includes('прочитай') || lowerText.includes('прочти');
+      if (isNewRequest) {
+        const bookInfo = await BookNarrationService.parseBookRequest(text);
+        if (!bookInfo || !bookInfo.title) {
+          await this.safeSendMessageToChat(cleanId, "Какую книгу вы хотите озвучить? Уточните, пожалуйста, название и автора.");
+          return true;
+        }
+
+        const availability = await BookNarrationService.checkBookAvailability(bookInfo.title, bookInfo.author);
+        if (!availability.isAvailable) {
+          const errMsg = `Книга "${bookInfo.title}" в свободном доступе пока нет. Могу сообщить когда появится, или вот ссылка на магазин: ${availability.purchaseLink}`;
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, errMsg);
+          } else {
+            await this.safeSendMessageToChat(cleanId, errMsg);
+          }
+          return true;
+        }
+
+        const chapterText = await BookNarrationService.getChapterText(bookInfo.title, bookInfo.author, 1);
+        if (chapterText) {
+          BookNarrationService.saveState(cleanId, bookInfo.title, bookInfo.author, 1, true);
+          // Всегда отправляем и текстом, и голосом
+          await this.safeSendMessageToChat(cleanId, chapterText);
+          await this.synthesizeAndSendVoice(cleanId, chapterText);
+          
+          // Небольшая задержка перед вопросом "Продолжаем?"
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          await this.safeSendMessageToChat(cleanId, "Продолжаем?");
+        } else {
+          await this.safeSendMessageToChat(cleanId, `К сожалению, не удалось получить текст первой главы книги "${bookInfo.title}".`);
+        }
+        return true;
+      }
+
+      return false;
+    } catch (err: any) {
+      logger.error(`❌ [MaxAdapter] Ошибка озвучки книги: ${err?.message || err}`);
       return false;
     }
   }
@@ -1892,6 +2037,12 @@ export class MaxAdapter {
           const mime = getImageMimeType(buf, imgRes.headers.get('content-type'));
           const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
 
+          const isPresReq = text && (text.toLowerCase().includes('презентац') || text.toLowerCase().includes('слайд'));
+          if (isPresReq) {
+            await this.handlePresentationRequest(cleanId, text, dataUrl, isVoiceInput);
+            return res.status(200).send('ok');
+          }
+
           const visionPrompt = text && text.trim() ? text.trim() : 'Что изображено на этом фото? Опиши подробно.';
           const visionResponse = await callVision(visionPrompt, dataUrl);
           const finalReply = stripMarkdown(visionResponse);
@@ -1905,7 +2056,7 @@ export class MaxAdapter {
           return res.status(200).send('ok');
         } catch (visionErr: any) {
           logger.error(`❌ [MaxAdapter] Ошибка Vision: ${visionErr?.message || visionErr}`);
-          const errMsg = 'Не удалось проанализировать изображение. Пожалуйста, попробуйте еще раз.';
+          const errMsg = 'На полученном изображении просматриваются очертания контента или интерфейса, но из-за временных сложностей при обработке файла мне трудно разобрать детали со 100% точностью. Похоже на снимок экрана или фотографию. Пожалуйста, опишите словами, что именно здесь изображено, или пришлите изображение в другом формате, чтобы я мог составить точный промт для генерации!';
           if (isVoiceInput) {
             await this.synthesizeAndSendVoice(cleanId, errMsg);
           } else {
@@ -1971,6 +2122,13 @@ export class MaxAdapter {
 
       // Команды владельца для принудительной фиксации голоса
       const lowerTrimmed = text.trim().toLowerCase();
+
+      // === ОЗВУЧКА КНИГ (Selin_AI) ===
+      const handledBook = await this.handleBookNarrationRequest(cleanId, text, isVoiceInput);
+      if (handledBook) {
+        return res.status(200).send('ok');
+      }
+
       if (isOwner(cleanId) && (lowerTrimmed === 'голос: муж' || lowerTrimmed === 'голос: жен' || lowerTrimmed === 'голос:муж' || lowerTrimmed === 'голос:жен')) {
         const targetGender = (lowerTrimmed.includes('муж')) ? 'male' : 'female';
         setVoiceGender(cleanId, targetGender, 1); // 1 = принудительно зафиксирован!
@@ -2015,6 +2173,13 @@ export class MaxAdapter {
         } else {
           await this.safeSendMessageToChat(cleanId, reply);
         }
+        return res.status(200).send('ok');
+      }
+
+      // === ГЕНЕРАЦИЯ ПРЕЗЕНТАЦИЙ (Selin_AI PRO) ===
+      const isPresReq = lowerText.includes('презентац') || lowerText.includes('слайд');
+      if (isPresReq) {
+        await this.handlePresentationRequest(cleanId, text, null, isVoiceInput);
         return res.status(200).send('ok');
       }
 

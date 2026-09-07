@@ -605,7 +605,7 @@ export async function synthesizeForChat(
     text.includes("Здравствуйте! Меня зовут Селин");
 
   let voice = options.voice || (isHook ? 'ru-RU-SvetlanaNeural' : voiceConfig.voice);
-  const defaultRate = isHook ? 0.95 : parseFloat(voiceConfig.rate);
+  const defaultRate = isHook ? 1.1 : parseFloat(voiceConfig.rate);
   const numRate = parseRate(options.rate, options.speed, defaultRate);
   const pitch = options.pitch || voiceConfig.pitch;
 

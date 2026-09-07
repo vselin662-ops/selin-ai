@@ -25,3 +25,5 @@ export * from './gemini.service';
 export * from './max-bot.service';
 export * from './aiOrchestrator';
 export * from './WebSearchService';
+export * from './presentationService';
+export * from './BookNarrationService';
