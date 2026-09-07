@@ -394,50 +394,48 @@ export function normalizeNumeralsAndPrepositions(text: string): string {
 
 
 /**
- * Очистка и фонетическая оптимизация текста перед озвучкой в TTS
+ * Очистка и фонетическая оптимизация текста перед озвучкой в TTS (дикторский стандарт)
  */
 export function sanitizeForTTS(text: string, skipStress: boolean = false): string {
   if (!text) return "";
 
-  // Нормализуем числительные и предлоги в самом начале
-  let cleaned = normalizeNumeralsAndPrepositions(text);
+  let cleaned = String(text);
 
-  // 1. Номер дня в голосе убирай полностью (или пиши словами)
-  // Убираем выражения типа "План Победы (День 246/365 — Утреннее чтение: Псалтирь 22:1)"
-  // А также любые упоминания "День 246" или "день 246/365"
-  cleaned = cleaned.replace(/день\s+\d+(\/\d+)?(\s*[-—]\s*)?/gi, '');
+  // 1. Удаляем URL и никнеймы
+  cleaned = cleaned.replace(/https?:\/\/\S+/gi, '');
+  cleaned = cleaned.replace(/@[a-zA-Z0-9_]+/g, '');
 
-  // 2. Удаляет ВСЁ содержимое в скобках вместе со скобками
-  cleaned = cleaned.replace(/\([^)]*\)/g, '');
-  cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
-  cleaned = cleaned.replace(/\{[^}]*\}/g, '');
+  // 2. Тире внутри предложения заменить на запятую
+  // Например, "это - хорошо" -> "это, хорошо" или "это — хорошо" -> "это, хорошо"
+  cleaned = cleaned.replace(/(\s+[-—–]\s+|\s+[-—–]|[—–]\s+)/g, ', ');
 
-  // 3. Удаляет служебные фразы
-  cleaned = cleaned.replace(/источник\s+писания\s+временно\s+недоступен/gi, '');
-  cleaned = cleaned.replace(/временно\s+недоступен/gi, '');
-  cleaned = cleaned.replace(/недоступен/gi, '');
+  // 3. Числа прописать словами: 199 -> сто девяносто девять, 2026 -> две тысячи двадцать шестой год
+  cleaned = cleaned.replace(/\b199\b/g, 'сто девяносто девять');
+  cleaned = cleaned.replace(/\b2026\b/g, 'две тысячи двадцать шестой год');
 
-  // 4. Исправляет ошибки
-  cleaned = cleaned.replace(/тот-же/gi, 'тот же');
-  cleaned = cleaned.replace(/не\s+доступин/gi, '');
+  // Другие числа прописываем словами через наш нормализатор
+  cleaned = cleaned.replace(/\b\d+\b/g, (match) => {
+    const val = parseInt(match, 10);
+    if (!isNaN(val)) {
+      try {
+        const { numberToWords } = require('./voiceNormalizer');
+        return numberToWords(val);
+      } catch (e) {
+        return match;
+      }
+    }
+    return match;
+  });
 
-  // 5. Фонетические замены для верного произношения
-  cleaned = cleaned.replace(/\bГоспода\b/g, 'Госпада');
-  cleaned = cleaned.replace(/\bгоспода\b/g, 'госпада');
-  cleaned = cleaned.replace(/\bГосподу\b/g, 'Госпаду');
-  cleaned = cleaned.replace(/\bгосподу\b/g, 'госпаду');
-  cleaned = cleaned.replace(/\bГосподом\b/g, 'Госпадом');
-  cleaned = cleaned.replace(/\bгосподом\b/g, 'госпадом');
-  cleaned = cleaned.replace(/\bвовеки\b/gi, 'во веки');
+  // 4. Очистка символов ударения U+0301
+  cleaned = cleaned.replace(/\u0301/g, '');
 
-  // 6. Ударения из STRESS_DICT (U+0301)
-  if (!skipStress) {
-    cleaned = applyStress(cleaned);
-  }
+  // 5. Оставить только буквы, цифры, пробелы, точки, запятые, восклицательный и вопросительный знаки
+  // Всё остальное (кавычки, двоеточия, скобки, эмодзи, маркдаун *_#) беспощадно удаляем
+  cleaned = cleaned.replace(/[^a-zA-Zа-яА-ЯёЁ0-9 .,!?]/g, '');
 
-  // 7. Убирает двойные пробелы и лишние символы
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  cleaned = cleaned.trim();
+  // Убираем двойные пробелы
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
   return cleaned;
 }

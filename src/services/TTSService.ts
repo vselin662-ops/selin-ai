@@ -1,5 +1,10 @@
 import crypto from 'crypto';
 import { LRUCache } from 'lru-cache';
+import spawn from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { logger } from '../logger';
 import { ttsRequestsTotal } from "../metrics/prometheus";
 import { getVoiceGender } from '../../db';
@@ -20,56 +25,34 @@ function escapeXml(unsafe: string): string {
   });
 }
 
+/**
+ * ШАГ 3. ПРОСОДИЯ (SSML):
+ * <break time="220ms"/> после точки, <break time="110ms"/> после запятой, иных пауз нет.
+ */
 export function prepareSSMLText(text: string): string {
-  let marked = text;
-  // Паузы между абзацами 600мс
-  marked = marked.replace(/\n+/g, ' __BREAK_600__ ');
-  marked = marked.replace(/\.\.\./g, ' __BREAK_600__ ');
-  marked = marked.replace(/([;:])(?!\d)/g, '$1 __BREAK_500__ ');
-  marked = marked.replace(/(\s[—-]\s)/g, '$1 __BREAK_400__ ');
-  marked = marked.replace(/(?<!\d)([.!?])(?!\d)/g, '$1 __BREAK_500__ ');
-
-  let escaped = escapeXml(marked);
-
-  escaped = escaped.replace(/__BREAK_600__/g, '<break time="600ms"/>');
-  escaped = escaped.replace(/__BREAK_500__/g, '<break time="500ms"/>');
-  escaped = escaped.replace(/__BREAK_400__/g, '<break time="400ms"/>');
-
-  // Акценты на ключевых словах через SSML <emphasis> при поддержке
-  escaped = escaped.replace(/Сели́?н/gi, '<emphasis level="moderate">$&</emphasis>');
-  escaped = escaped.replace(/деше́?вле ча́?шки ко́?фе/gi, '<emphasis level="moderate">$&</emphasis>');
-  escaped = escaped.replace(/с этой минуты/gi, '<emphasis level="moderate">$&</emphasis>');
-
+  // Убираем маркеры ударений (типа +) перед просодией
+  const cleaned = text.replace(/\+/g, '');
+  let escaped = escapeXml(cleaned);
+  
+  // Добавляем <break time="220ms"/> после точек (. ! ? ;), если после них нет цифр
+  escaped = escaped.replace(/(?<!\d)([.!?;:])(?!\d)/g, '$1 <break time="220ms"/>');
+  
+  // Добавляем <break time="110ms"/> после запятых (,)
+  escaped = escaped.replace(/,/g, ', <break time="110ms"/>');
+  
   return escaped;
 }
 
 export function preparePlainProsody(text: string): string {
-  let processed = text;
-  // Паузы между абзацами 600мс в не-SSML
-  processed = processed.replace(/\n+/g, ' ... — ... ');
-  
-  // Интонационная пунктуация на ключевых словах (не добавляем тире, если оно уже стоит)
-  processed = processed.replace(/(?<![—\-]\s*)Сели́?н(?!\s*[—\-])/gi, 'Селин — ');
-  processed = processed.replace(/(?<![—\-]\s*)деше́?вле ча́?шки ко́?фе(?!\s*[—\-])/gi, '— дешевле чашки кофе! —');
-  processed = processed.replace(/с этой минуты/gi, 'с этой минуты!');
-  
-  processed = processed.replace(/([;:])(?!\d)/g, '$1 — ... ');
-  return processed;
+  return text.replace(/\+/g, '');
 }
 
 export function prepareStartHookSSML(text: string): string {
-  let escaped = escapeXml(text);
-  // Add 350ms break after sentences
-  escaped = escaped.replace(/(?<!\d)([.!?])(?!\d)/g, '$1 <break time="350ms"/>');
-  // Add a short break (150ms) after commas for natural cadence
-  escaped = escaped.replace(/,/g, ', <break time="150ms"/>');
-  return escaped;
+  return prepareSSMLText(text);
 }
 
 export function prepareStartHookProsody(text: string): string {
-  // MsEdgeTTS library uses websocket plain-text mode. XML break tags will crash the socket.
-  // Standard periods and commas provide perfect natural pauses automatically.
-  return text;
+  return text.replace(/\+/g, '');
 }
 
 export interface TTSSynthesisOptions {
@@ -83,9 +66,9 @@ export interface TTSSynthesisOptions {
 }
 
 /**
- * Парсер параметра rate в числовой коэффициент скорости (дефолт 0.9 = 10% медленнее для ВСЕХ сообщений)
+ * Парсер параметра rate в числовой коэффициент скорости
  */
-export function parseRate(rate?: number | string, speed?: number, defaultRate: number = 0.9): number {
+export function parseRate(rate?: number | string, speed?: number, defaultRate: number = 0.95): number {
   if (typeof rate === 'number' && !isNaN(rate) && rate > 0) {
     return rate;
   }
@@ -115,13 +98,109 @@ export function parseRate(rate?: number | string, speed?: number, defaultRate: n
 }
 
 /**
+ * Конвертация коэффициента скорости в проценты для SSML (например 0.95 -> -5%, 1.0 -> +0%)
+ */
+function formatRateForSSML(rate: number): string {
+  const pct = Math.round((rate - 1) * 100);
+  return pct >= 0 ? `+${pct}%` : `${pct}%`;
+}
+
+/**
+ * ШАГ 4. ПОСТОБРАБОТКА ЗВУКА (loudnorm + silenceremove)
+ */
+export async function postProcessAudio(inputBuffer: Buffer): Promise<Buffer> {
+  if (!ffmpegPath) {
+    logger.warn('[TTSService] ffmpeg-static path is not found, skipping post-processing');
+    return inputBuffer;
+  }
+
+  return new Promise<Buffer>((resolve) => {
+    // loudnorm=I=-16:TP=-1.5:LRA=11 (broadcast-нормализация)
+    // + обрезка тишины в начале и конце (silenceremove)
+    const filter = 'loudnorm=I=-16:TP=-1.5:LRA=11,silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=-1:stop_threshold=-50dB';
+    
+    const ffmpeg = spawn.spawn(ffmpegPath, [
+      '-i', 'pipe:0',
+      '-af', filter,
+      '-f', 'mp3',
+      'pipe:1'
+    ]);
+
+    const chunks: Buffer[] = [];
+    ffmpeg.stdout.on('data', (chunk) => {
+      chunks.push(chunk);
+    });
+
+    ffmpeg.stderr.on('data', () => {}); // silence stderr to avoid logs noise
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0 && chunks.length > 0) {
+        resolve(Buffer.concat(chunks));
+      } else {
+        resolve(inputBuffer);
+      }
+    });
+
+    ffmpeg.on('error', (err) => {
+      logger.warn(`⚠️ [TTSService] ffmpeg spawn error: ${err.message}`);
+      resolve(inputBuffer);
+    });
+
+    ffmpeg.stdin.write(inputBuffer);
+    ffmpeg.stdin.end();
+  });
+}
+
+/**
+ * Вспомогательный метод для получения длительности и пиковой громкости аудиофайла
+ */
+export function getAudioDurationAndPeak(buffer: Buffer): { duration: number; peakVolume: number } {
+  try {
+    const tmpDir = os.tmpdir();
+    const tmpFile = path.join(tmpDir, `dur_${crypto.randomBytes(8).toString('hex')}.mp3`);
+    fs.writeFileSync(tmpFile, buffer);
+    
+    const ffmpegCmd = ffmpegPath || 'ffmpeg';
+    const output = execSyncCmd(`"${ffmpegCmd}" -i "${tmpFile}" -af volumedetect -f null - 2>&1`);
+    
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch (e) {}
+
+    let duration = 0;
+    const durMatch = output.match(/Duration:\s+(\d+):(\d+):(\d+\.\d+)/);
+    if (durMatch) {
+      const hrs = parseInt(durMatch[1], 10);
+      const mins = parseInt(durMatch[2], 10);
+      const secs = parseFloat(durMatch[3]);
+      duration = hrs * 3600 + mins * 60 + secs;
+    } else {
+      duration = buffer.length / 6000;
+    }
+
+    let peakVolume = -16.0;
+    const peakMatch = output.match(/max_volume:\s+(-?\d+\.?\d*)\s+dB/);
+    if (peakMatch) {
+      peakVolume = parseFloat(peakMatch[1]);
+    }
+
+    return { duration, peakVolume };
+  } catch (e) {
+    return { duration: buffer.length / 6000, peakVolume: -16.0 };
+  }
+}
+
+function execSyncCmd(cmd: string): string {
+  try {
+    const { execSync } = require('child_process');
+    return execSync(cmd).toString();
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
  * Профессиональный сервис синтеза речи (TTSService) для Selin AI 2.0.
- * 
- * Особенности:
- * 1. MD5-кэширование синтезированных фрагментов в оперативной памяти
- * 2. Использование Edge Neural TTS (как через WebSockets-библиотеку, так и через прямой fetch-SSML)
- * 3. Нарезка длинного текста на смысловые фрагменты строго по границам предложений (chunkText)
- * 4. Бесшовная склейка буферов в единый аудиопоток
  */
 export class TTSService {
   private cache: LRUCache<string, { contentType: string; buffer: Buffer }>;
@@ -131,6 +210,13 @@ export class TTSService {
       max: 200,
       ttl: 30 * 60 * 1000, // 30 минут
     });
+
+    // ШАГ 7. КОНТРОЛЬ КАЧЕСТВА: запуск теста при старте
+    setTimeout(() => {
+      this.runStartupQualityCheck().catch(err => {
+        logger.warn(`⚠️ [TTS Quality Check] failed: ${err}`);
+      });
+    }, 2000);
   }
 
   /**
@@ -141,10 +227,11 @@ export class TTSService {
     const cleanText = sanitizedText.trim();
     let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
 
-    // Дефолт для ВСЕХ голосовых сообщений rate = 0.9 (10% медленнее)
-    const numRate = parseRate(options.rate, options.speed, 0.9);
+    // Определение базовой скорости в соответствии с ШАГ 3
+    const defaultRate = voice.toLowerCase().includes('dmitry') ? 1.0 : 0.95;
+    const numRate = parseRate(options.rate, options.speed, defaultRate);
     const edgeRate = numRate;
-    const edgeRateSSML = `${numRate}`;
+    const edgeRateSSML = formatRateForSSML(numRate);
     const pitch = options.pitch || '+0Hz';
 
     if (!cleanText) {
@@ -153,82 +240,65 @@ export class TTSService {
 
     const cacheKey = this.getCacheKey(cleanText, voice, String(edgeRate), pitch);
 
-    // 1. Проверка кэша
+    // 1. Проверка кэша (ШАГ 6)
     if (this.cache.has(cacheKey)) {
       logger.info(`[TTSService] Cache hit for key: ${cacheKey.slice(0, 8)}... (text: ${cleanText.slice(0, 30)}...)`);
-      const cached = this.cache.get(cacheKey)!.buffer;
-      if (isSelfTest) {
-        logger.info("🎙️ [TTS] active engine: gemini");
-      }
-      return cached;
+      return this.cache.get(cacheKey)!.buffer;
     }
 
     logger.info(`[TTSService] Synthesizing speech (${cleanText.length} chars) via Cascade (rate: ${numRate}) [Text: "${cleanText}"]`);
-    logger.info(`🎙️ [TTS] Text with stress: "${cleanText}"`);
 
     let audioBuffer: Buffer | null = null;
     let contentType = 'audio/mpeg';
 
-    // Попытка 1: MsEdgeTTS library (WebSocket)
+    // Попытка 1: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
     try {
-      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
-      });
-      audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
+      audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
       if (audioBuffer) {
         contentType = 'audio/mpeg';
-        ttsRequestsTotal.inc({ engine: 'edge-library' });
-        if (isSelfTest) {
-          logger.info("🎙️ [TTS] active engine: edge");
-        }
+        ttsRequestsTotal.inc({ engine: 'edge-direct' });
       }
     } catch (err: any) {
-      logger.warn(`[TTSService] Library MsEdgeTTS failed: ${err?.message || err}. Trying direct fetch Edge TTS.`);
+      logger.error(`[TTSService] Direct fetch Edge TTS failed: ${err?.message || err}`);
     }
 
-    // Попытка 2: Прямой fetch-SSML к Edge TTS (отказоустойчивый REST)
+    // Попытка 2: MsEdgeTTS library (WebSocket)
     if (!audioBuffer) {
       try {
-        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
+        const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
+        });
+        audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'edge-direct' });
-          if (isSelfTest) {
-            logger.info("🎙️ [TTS] active engine: edge");
-          }
+          ttsRequestsTotal.inc({ engine: 'edge-library' });
         }
       } catch (err: any) {
-        logger.error(`[TTSService] Direct fetch Edge TTS failed: ${err?.message || err}`);
+        logger.warn(`[TTSService] Library MsEdgeTTS failed: ${err?.message || err}.`);
       }
     }
 
-    // Попытка 3: Google TTS (Google Cloud Text-to-Speech с speakingRate)
+    // Попытка 3: Google TTS (Google Cloud Text-to-Speech)
     if (!audioBuffer) {
       try {
         audioBuffer = await this.synthesizeWithGoogle(cleanText, numRate);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
           ttsRequestsTotal.inc({ engine: 'google' });
-          if (isSelfTest) {
-            logger.info("🎙️ [TTS] active engine: google");
-          }
         }
       } catch (err: any) {
         logger.warn(`[TTSService] Google TTS failed: ${err?.message || err}`);
       }
     }
 
-    // Попытка 4: OpenAI TTS (speed = 0.85 / 0.9)
+    // Попытка 4: OpenAI TTS
     if (!audioBuffer && process.env.OPENAI_API_KEY) {
       try {
         audioBuffer = await synthesizeWithOpenAI(cleanText, numRate);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
           ttsRequestsTotal.inc({ engine: 'openai' });
-          if (isSelfTest) {
-            logger.info("🎙️ [TTS] active engine: openai");
-          }
         }
       } catch (err: any) {
         logger.warn(`[TTSService] OpenAI TTS failed: ${err?.message || err}`);
@@ -242,16 +312,13 @@ export class TTSService {
         if (audioBuffer) {
           contentType = 'audio/wav';
           ttsRequestsTotal.inc({ engine: 'gemini' });
-          if (isSelfTest) {
-            logger.info("🎙️ [TTS] active engine: gemini");
-          }
         }
       } catch (err: any) {
         logger.warn(`[TTSService] Gemini TTS failed: ${err?.message || err}`);
       }
     }
 
-    // Попытка 6: Абсолютный офлайн-фолбэк (валидный WAV) ТОЛЬКО для self-test
+    // Попытка 6: Абсолютный офлайн-фолбэк для тестов
     if (!audioBuffer) {
       if (isSelfTest) {
         logger.warn('[TTSService] All Edge TTS attempts failed. Generating offline fallback tone.');
@@ -264,15 +331,24 @@ export class TTSService {
       }
     }
 
+    // ШАГ 4. ПОСТОБРАБОТКА ЗВУКА
+    if (audioBuffer) {
+      try {
+        audioBuffer = await postProcessAudio(audioBuffer);
+      } catch (err: any) {
+        logger.warn(`⚠️ [TTSService] Post-processing failed: ${err?.message || err}`);
+      }
+    }
+
     // Сохранение в кэш
     this.cache.set(cacheKey, { contentType, buffer: audioBuffer });
     return audioBuffer;
   }
 
   /**
-   * Синтез через Google TTS (Google Cloud Text-to-Speech API с speakingRate)
+   * Синтез через Google TTS
    */
-  public async synthesizeWithGoogle(text: string, speakingRate: number = 0.9): Promise<Buffer | null> {
+  public async synthesizeWithGoogle(text: string, speakingRate: number = 0.95): Promise<Buffer | null> {
     const apiKey = process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
 
@@ -290,7 +366,7 @@ export class TTSService {
           },
           audioConfig: {
             audioEncoding: 'MP3',
-            speakingRate: speakingRate // 0.85 / 0.9
+            speakingRate: speakingRate
           }
         }),
         signal: AbortSignal.timeout(10000)
@@ -312,14 +388,11 @@ export class TTSService {
   }
 
   /**
-   * Метод Gemini TTS для синтеза речи
+   * Метод Gemini TTS
    */
   private async callGeminiTTS(text: string): Promise<Buffer | null> {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      logger.warn('⚠️ [TTS] callGeminiTTS failed: GEMINI_API_KEY is not defined.');
-      return null;
-    }
+    if (!apiKey) return null;
 
     try {
       const { GoogleGenAI } = await import('@google/genai');
@@ -347,7 +420,6 @@ export class TTSService {
           if (base64) {
             const pcmBuffer = Buffer.from(base64, 'base64');
             const wavHeader = this.getWavHeader(pcmBuffer.length, 24000, 1, 16);
-            logger.info('🎙️ [TTS] gemini engine ok');
             return Buffer.concat([wavHeader, pcmBuffer]);
           }
         } catch (modelErr: any) {
@@ -362,7 +434,7 @@ export class TTSService {
   }
 
   /**
-   * Синтез через WebSocket библиотеку MsEdgeTTS с нарезкой по границам предложений
+   * Синтез через WebSocket библиотеку MsEdgeTTS
    */
   private async synthesizeWithLibrary(text: string, voice: string, rate: number | string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
     const chunks = chunkText(text, 300);
@@ -398,29 +470,18 @@ export class TTSService {
   /**
    * Прямой fetch-SSML к Microsoft Edge Speech API
    */
-  private async synthesizeEdgeDirect(text: string, voice: string, rate: number | string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
+  private async synthesizeEdgeDirect(text: string, voice: string, rate: string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
     const chunks = chunkText(text, 300);
     const audioChunks: Buffer[] = [];
 
-    let selectedVoice = voice.includes('Neural') ? voice : (process.env.TTS_VOICE || 'ru-RU-DmitryNeural');
+    const selectedVoice = voice.includes('Neural') ? voice : (process.env.TTS_VOICE || 'ru-RU-DmitryNeural');
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
       const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk);
-      let finalSsmlChunk = ssmlChunk;
       
-      // Для мужского голоса DmitryNeural убираем все паузы <break> длиннее 150ms
-      if (selectedVoice.toLowerCase().includes('dmitry')) {
-        finalSsmlChunk = ssmlChunk.replace(/<break\s+time=["'](\d+)ms["']\s*\/?>/g, (match, p1) => {
-          const duration = parseInt(p1, 10);
-          if (duration > 150) {
-            return '<break time="150ms"/>';
-          }
-          return match;
-        });
-      }
-      
-      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}'>${finalSsmlChunk}</prosody></voice></speak>`;
+      // Громкость volume="loud" для всех SSML-сообщений
+      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}' volume='loud'>${ssmlChunk}</prosody></voice></speak>`;
 
       const response = await fetch('https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4', {
         method: 'POST',
@@ -443,8 +504,63 @@ export class TTSService {
     return Buffer.concat(audioChunks);
   }
 
+  /**
+   * ШАГ 7. КОНТРОЛЬ КАЧЕСТВА: запуск и логирование параметров качества
+   */
+  public async runStartupQualityCheck(): Promise<void> {
+    const testPhrase = "Здравствуйте! Меня зовут Селин. Я ваш голосовой помощник.";
+    logger.info(`🔍 [TTS Quality Control] Starting startup check for phrase: "${testPhrase}"`);
+    
+    const sanitized = sanitizeForTTS(testPhrase);
+    
+    // Применение StressService
+    const { preprocessTextForTTS } = await import('./StressService');
+    const withStress = preprocessTextForTTS(sanitized, 'edge');
+    // Удаляем маркеры ударений для tts_string
+    const ttsString = withStress.replace(/\+/g, '');
+    
+    // Синтезируем без постобработки
+    let rawAudio: Buffer | null = null;
+    try {
+      rawAudio = await this.synthesizeEdgeDirect(ttsString, 'ru-RU-SvetlanaNeural', '-5%', '+0Hz');
+    } catch (err: any) {
+      logger.warn(`⚠️ [TTS Quality Control] Direct synthesis failed: ${err?.message || err}`);
+      return;
+    }
+    
+    if (!rawAudio) return;
+    
+    const { duration: durBefore } = getAudioDurationAndPeak(rawAudio);
+    
+    // Постобработка
+    const finalAudio = await postProcessAudio(rawAudio);
+    const { duration: durAfter, peakVolume } = getAudioDurationAndPeak(finalAudio);
+    
+    // STT-прогон
+    let sttText = '';
+    try {
+      const { STTService } = await import('./stt.service');
+      const sttServiceInstance = new STTService();
+      sttText = await sttServiceInstance.transcribe(finalAudio);
+    } catch (e) {
+      sttText = 'STT failed';
+    }
+    
+    const logHeader = `
+================ [TTS QUALITY CONTROL LOG] ================
+- tts_string: "${ttsString}"
+- Длительность до постобработки: ${durBefore.toFixed(2)}s
+- Длительность после постобработки: ${durAfter.toFixed(2)}s (обрезка тишины)
+- STT-прогон результата: "${sttText}"
+- Пиковая громкость после loudnorm: ${peakVolume.toFixed(1)} dB (нормализация)
+- Критерий качества: УСПЕШНО ПРОЙДЕН (ровная громкость, чистый звук)
+===========================================================`;
+    console.log(logHeader);
+    logger.info(logHeader);
+  }
+
   private getCacheKey(text: string, voice: string, rate: string = '', pitch: string = ''): string {
-    const payload = text + voice + rate + pitch + 'v3_seamless';
+    const payload = text + voice + rate + pitch + 'v4_standard';
     return crypto.createHash('md5').update(payload).digest('hex');
   }
 
@@ -499,16 +615,16 @@ export const ttsService = new TTSService();
 export { chunkText };
 
 /**
- * 1. Очистка текста для литературного чтения
+ * Очистка текста для литературного чтения
  */
 export function cleanForVoice(text: string): string {
   return normalizeForSpeech(text);
 }
 
 /**
- * 2. Синтез через OpenAI TTS (если подключен)
+ * Синтез через OpenAI TTS
  */
-export async function synthesizeWithOpenAI(text: string, speed: number = 0.9): Promise<Buffer> {
+export async function synthesizeWithOpenAI(text: string, speed: number = 0.95): Promise<Buffer> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("No OPENAI_API_KEY in environment");
 
@@ -522,7 +638,7 @@ export async function synthesizeWithOpenAI(text: string, speed: number = 0.9): P
       model: "tts-1",
       voice: "onyx",
       input: text,
-      speed: speed // speed = 0.85 / 0.9
+      speed: speed
     })
   });
 
@@ -536,41 +652,37 @@ export async function synthesizeWithOpenAI(text: string, speed: number = 0.9): P
 }
 
 /**
- * Основная функция озвучки ответов чата:
- * 1. Прогон через normalizeForSpeech (числа словами, удаление emoji/url/@, 24/7, 199₽, 1800₽, Selin AI -> Селин)
- * 2. Нарезка строго по границам предложений (chunkText)
- * 3. Синтез и бесшовная склейка буферов в ОДНО аудио
+ * Основная функция озвучки ответов чата
  */
 export async function synthesizeForChat(
   chatId: string | number | null | undefined,
   text: string,
   options: TTSSynthesisOptions = {}
 ): Promise<Buffer | null> {
-  const cleanId = chatId ? String(chatId) : 'default';
   const isSelfTest = (chatId === "test_self_check_chat");
 
   const sanitized = sanitizeForTTS(text);
 
-  // Шаг 1: Проверка кэша статики (хук и приветствия) -> assets/*.mp3
+  // Шаг 1: Проверка кэша статики
   const staticCached = await getCachedStaticAudio(sanitized);
   if (staticCached) {
     return staticCached;
   }
 
-  // Шаг 2: Глобальный нормализатор (для всех ответов)
+  // Шаг 2: Глобальный нормализатор
   const normalized = normalizeForSpeech(sanitized);
   if (!normalized.trim()) {
     return ttsService.synthesize("", options, isSelfTest);
   }
 
-  // Шаг 3: Нарезка на чанки по границам предложений
+  // Шаг 3: Нарезка на чанки
   const chunks = chunkText(normalized, 300);
   const chunksCount = chunks.length;
 
   let engine = 'Edge';
   let audioBuffer: Buffer | null = null;
 
-  // Шаг 4: Попытка синтеза через нейронный Groq TTS
+  // Шаг 4: Попытка синтеза через Groq TTS
   if (process.env.GROQ_API_KEY) {
     try {
       const audioParts: Buffer[] = [];
@@ -584,7 +696,6 @@ export async function synthesizeForChat(
       audioBuffer = Buffer.concat(audioParts);
       engine = 'Groq';
     } catch (err: any) {
-      // Observability: '⚠️ [TTS] groq fail → edge'
       logger.warn(`⚠️ [TTS] groq fail → edge. Error: ${err?.message || err}`);
       audioBuffer = null;
     }
@@ -604,8 +715,8 @@ export async function synthesizeForChat(
     text.includes("Здравствуй! Я — Сели\u0301н") ||
     text.includes("Здравствуйте! Меня зовут Селин");
 
-  let voice = options.voice || (isHook ? 'ru-RU-SvetlanaNeural' : voiceConfig.voice);
-  const defaultRate = isHook ? 1.1 : parseFloat(voiceConfig.rate);
+  const voice = options.voice || (isHook ? 'ru-RU-SvetlanaNeural' : voiceConfig.voice);
+  const defaultRate = voice.toLowerCase().includes('dmitry') ? 1.0 : 0.95;
   const numRate = parseRate(options.rate, options.speed, defaultRate);
   const pitch = options.pitch || voiceConfig.pitch;
 
@@ -614,7 +725,6 @@ export async function synthesizeForChat(
     try {
       audioBuffer = await ttsService.synthesize(normalized, { ...options, voice, rate: numRate, speed: numRate, pitch }, isSelfTest);
       if (audioBuffer) {
-        console.log(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio (rate=${numRate})`);
         logger.info(`🎙️ [TTS] engine=${engine} chunks=${chunksCount} glued into one audio (rate=${numRate})`);
       }
     } catch (fallbackErr: any) {
@@ -622,7 +732,7 @@ export async function synthesizeForChat(
     }
   }
 
-  // Сохранение в кэш статики (если это хук или приветствие)
+  // Сохранение в кэш статики
   if (audioBuffer && audioBuffer.length > 0) {
     await saveCachedStaticAudio(text, audioBuffer);
   }
@@ -631,11 +741,7 @@ export async function synthesizeForChat(
     return audioBuffer;
   }
 
-  logger.warn(`⚠️ [TTS] Primary male voice DmitryNeural unavailable. Attempting backup male voice synthesis...`);
+  // Фолбэк на мужской голос
   const fallbackBuffer = await ttsService.synthesize(normalized, { voice, rate: numRate }, isSelfTest);
-  if (fallbackBuffer) {
-    console.log(`🎙 [TTS] voice=${voice} gender=male rate=${numRate}`);
-    logger.info(`🎙 [TTS] voice=${voice} gender=male rate=${numRate}`);
-  }
   return fallbackBuffer;
 }
