@@ -385,7 +385,7 @@ async function startServer() {
       // Pre-generate Start Voice Hook (asynchronously, non-blocking)
       try {
         const { pregenerateStartHook } = await import("./src/services/StartHookService");
-        await pregenerateStartHook();
+        await pregenerateStartHook(true);
       } catch (err: any) {
         logger.warn(`⚠️ [StartHook] Server startup pre-generation error: ${err?.message || err}`);
       }

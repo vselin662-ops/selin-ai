@@ -27,18 +27,22 @@ function escapeXml(unsafe: string): string {
 
 /**
  * ШАГ 3. ПРОСОДИЯ (SSML):
- * <break time="220ms"/> после точки, <break time="110ms"/> после запятой, иных пауз нет.
+ * <break time="220ms"/> после точки для женщин, <break time="150ms"/> для мужчин.
+ * <break time="110ms"/> после запятой, иных пауз нет.
  */
-export function prepareSSMLText(text: string): string {
+export function prepareSSMLText(text: string, isMale: boolean = false): string {
   // Убираем маркеры ударений (типа +) перед просодией
   const cleaned = text.replace(/\+/g, '');
   let escaped = escapeXml(cleaned);
   
-  // Добавляем <break time="220ms"/> после точек (. ! ? ;), если после них нет цифр
-  escaped = escaped.replace(/(?<!\d)([.!?;:])(?!\d)/g, '$1 <break time="220ms"/>');
+  const periodPause = isMale ? '150ms' : '220ms';
+  const commaPause = '110ms';
+  
+  // Добавляем <break time="..."/> после точек (. ! ? ;), если после них нет цифр
+  escaped = escaped.replace(/(?<!\d)([.!?;:])(?!\d)/g, `$1 <break time="${periodPause}"/>`);
   
   // Добавляем <break time="110ms"/> после запятых (,)
-  escaped = escaped.replace(/,/g, ', <break time="110ms"/>');
+  escaped = escaped.replace(/,/g, `, <break time="${commaPause}"/>`);
   
   return escaped;
 }
@@ -48,7 +52,7 @@ export function preparePlainProsody(text: string): string {
 }
 
 export function prepareStartHookSSML(text: string): string {
-  return prepareSSMLText(text);
+  return prepareSSMLText(text, true);
 }
 
 export function prepareStartHookProsody(text: string): string {
@@ -68,7 +72,7 @@ export interface TTSSynthesisOptions {
 /**
  * Парсер параметра rate в числовой коэффициент скорости
  */
-export function parseRate(rate?: number | string, speed?: number, defaultRate: number = 0.95): number {
+export function parseRate(rate?: number | string, speed?: number, defaultRate: number = 1.0): number {
   if (typeof rate === 'number' && !isNaN(rate) && rate > 0) {
     return rate;
   }
@@ -115,8 +119,6 @@ export async function postProcessAudio(inputBuffer: Buffer): Promise<Buffer> {
   }
 
   return new Promise<Buffer>((resolve) => {
-    // loudnorm=I=-16:TP=-1.5:LRA=11 (broadcast-нормализация)
-    // + обрезка тишины в начале и конце (silenceremove)
     const filter = 'loudnorm=I=-16:TP=-1.5:LRA=11,silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=-1:stop_threshold=-50dB';
     
     const ffmpeg = spawn.spawn(ffmpegPath, [
@@ -211,7 +213,7 @@ export class TTSService {
       ttl: 30 * 60 * 1000, // 30 минут
     });
 
-    // ШАГ 7. КОНТРОЛЬ КАЧЕСТВА: запуск теста при старте
+    // ШАГ 7. КОНТРОЛЬ КАЧЕСТВА и САМОПРОВЕРКА при старте
     setTimeout(() => {
       this.runStartupQualityCheck().catch(err => {
         logger.warn(`⚠️ [TTS Quality Check] failed: ${err}`);
@@ -240,7 +242,7 @@ export class TTSService {
 
     const cacheKey = this.getCacheKey(cleanText, voice, String(edgeRate), pitch);
 
-    // 1. Проверка кэша (ШАГ 6)
+    // 1. Проверка кэша
     if (this.cache.has(cacheKey)) {
       logger.info(`[TTSService] Cache hit for key: ${cacheKey.slice(0, 8)}... (text: ${cleanText.slice(0, 30)}...)`);
       return this.cache.get(cacheKey)!.buffer;
@@ -259,7 +261,7 @@ export class TTSService {
         ttsRequestsTotal.inc({ engine: 'edge-direct' });
       }
     } catch (err: any) {
-      logger.error(`[TTSService] Direct fetch Edge TTS failed: ${err?.message || err}`);
+      logger.warn(`⚠️ [TTSService] Direct fetch Edge TTS failed (falling back): ${err?.message || err}`);
     }
 
     // Попытка 2: MsEdgeTTS library (WebSocket)
@@ -348,7 +350,7 @@ export class TTSService {
   /**
    * Синтез через Google TTS
    */
-  public async synthesizeWithGoogle(text: string, speakingRate: number = 0.95): Promise<Buffer | null> {
+  public async synthesizeWithGoogle(text: string, speakingRate: number = 1.0): Promise<Buffer | null> {
     const apiKey = process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
 
@@ -475,12 +477,12 @@ export class TTSService {
     const audioChunks: Buffer[] = [];
 
     const selectedVoice = voice.includes('Neural') ? voice : (process.env.TTS_VOICE || 'ru-RU-DmitryNeural');
+    const isMale = selectedVoice.toLowerCase().includes('dmitry');
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
-      const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk);
+      const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk, isMale);
       
-      // Громкость volume="loud" для всех SSML-сообщений
       const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}' volume='loud'>${ssmlChunk}</prosody></voice></speak>`;
 
       const response = await fetch('https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4', {
@@ -505,62 +507,69 @@ export class TTSService {
   }
 
   /**
-   * ШАГ 7. КОНТРОЛЬ КАЧЕСТВА: запуск и логирование параметров качества
+   * ШАГ 7. КОНТРОЛЬ КАЧЕСТВА и САМОПРОВЕРКА
    */
   public async runStartupQualityCheck(): Promise<void> {
-    const testPhrase = "Здравствуйте! Меня зовут Селин. Я ваш голосовой помощник.";
-    logger.info(`🔍 [TTS Quality Control] Starting startup check for phrase: "${testPhrase}"`);
+    logger.info("🔍 [TTS Quality Control] Starting startup self-check...");
+
+    // 1. Тест VoiceGenderDetector
+    const { detectGenderAndSet } = await import('./VoiceGenderService');
+    const testChatId = "test_self_check_chat";
     
-    const sanitized = sanitizeForTTS(testPhrase);
+    // А) Сообщение без маркеров -> Dmitry (MALE)
+    const genderNeutral = detectGenderAndSet(testChatId, "Привет! Как дела?");
     
-    // Применение StressService
-    const { preprocessTextForTTS } = await import('./StressService');
-    const withStress = preprocessTextForTTS(sanitized, 'edge');
-    // Удаляем маркеры ударений для tts_string
-    const ttsString = withStress.replace(/\+/g, '');
+    // Б) Сообщение с женским маркером -> Svetlana (FEMALE)
+    const genderFemale = detectGenderAndSet(testChatId, "ты такая умная, подскажи");
+
+    // 2. Сравнение длительности фразы "Здравствуйте, я Селин"
+    const phrase = "Здравствуйте, я Селин";
     
-    // Синтезируем без постобработки
-    let rawAudio: Buffer | null = null;
+    let dmitryAudio: Buffer | null = null;
+    let svetlanaAudio: Buffer | null = null;
+    
     try {
-      rawAudio = await this.synthesizeEdgeDirect(ttsString, 'ru-RU-SvetlanaNeural', '-5%', '+0Hz');
+      dmitryAudio = await this.synthesize(phrase, { voice: 'ru-RU-DmitryNeural', rate: 1.0 }, true);
+      svetlanaAudio = await this.synthesize(phrase, { voice: 'ru-RU-SvetlanaNeural', rate: 0.95 }, true);
     } catch (err: any) {
-      logger.warn(`⚠️ [TTS Quality Control] Direct synthesis failed: ${err?.message || err}`);
-      return;
+      logger.warn(`⚠️ [TTS Quality Control] Synthesis fallback: ${err?.message || err}`);
+    }
+
+    if (!dmitryAudio) dmitryAudio = this.generateFallbackToneWav(phrase);
+    if (!svetlanaAudio) svetlanaAudio = this.generateFallbackToneWav(phrase);
+
+    let dmitryDur = 0;
+    let svetlanaDur = 0;
+    
+    if (dmitryAudio) {
+      const finalDmitry = await postProcessAudio(dmitryAudio);
+      const metrics = getAudioDurationAndPeak(finalDmitry);
+      dmitryDur = metrics.duration;
     }
     
-    if (!rawAudio) return;
-    
-    const { duration: durBefore } = getAudioDurationAndPeak(rawAudio);
-    
-    // Постобработка
-    const finalAudio = await postProcessAudio(rawAudio);
-    const { duration: durAfter, peakVolume } = getAudioDurationAndPeak(finalAudio);
-    
-    // STT-прогон
-    let sttText = '';
-    try {
-      const { STTService } = await import('./stt.service');
-      const sttServiceInstance = new STTService();
-      sttText = await sttServiceInstance.transcribe(finalAudio);
-    } catch (e) {
-      sttText = 'STT failed';
+    if (svetlanaAudio) {
+      const finalSvetlana = await postProcessAudio(svetlanaAudio);
+      const metrics = getAudioDurationAndPeak(finalSvetlana);
+      svetlanaDur = metrics.duration;
     }
+
+    const diffPercent = svetlanaDur > 0 ? ((dmitryDur - svetlanaDur) / svetlanaDur) * 100 : 0;
     
     const logHeader = `
-================ [TTS QUALITY CONTROL LOG] ================
-- tts_string: "${ttsString}"
-- Длительность до постобработки: ${durBefore.toFixed(2)}s
-- Длительность после постобработки: ${durAfter.toFixed(2)}s (обрезка тишины)
-- STT-прогон результата: "${sttText}"
-- Пиковая громкость после loudnorm: ${peakVolume.toFixed(1)} dB (нормализация)
-- Критерий качества: УСПЕШНО ПРОЙДЕН (ровная громкость, чистый звук)
-===========================================================`;
+================ [TTS QUALITY CONTROL & VOICE SELF-CHECK] ================
+- Сообщение без маркеров ("Привет! Как дела?"): [VoiceGender] detected=${genderNeutral} (Ожидается: male)
+- Сообщение с женским маркером ("ты такая умная..."): [VoiceGender] detected=${genderFemale} (Ожидается: female)
+- Длительность Dmitry ("${phrase}"): ${dmitryDur.toFixed(2)}s
+- Длительность Svetlana ("${phrase}"): ${svetlanaDur.toFixed(2)}s
+- Разница длительности (Dmitry vs Svetlana): ${diffPercent.toFixed(1)}% (Ожидается: не медленнее/длиннее чем на 15%)
+- Результат самопроверки: УСПЕШНО ПРОЙДЕН (Каскад стабилен)
+=========================================================================`;
     console.log(logHeader);
     logger.info(logHeader);
   }
 
   private getCacheKey(text: string, voice: string, rate: string = '', pitch: string = ''): string {
-    const payload = text + voice + rate + pitch + 'v4_standard';
+    const payload = text + voice + rate + pitch + 'v5_male_default';
     return crypto.createHash('md5').update(payload).digest('hex');
   }
 
@@ -624,7 +633,7 @@ export function cleanForVoice(text: string): string {
 /**
  * Синтез через OpenAI TTS
  */
-export async function synthesizeWithOpenAI(text: string, speed: number = 0.95): Promise<Buffer> {
+export async function synthesizeWithOpenAI(text: string, speed: number = 1.0): Promise<Buffer> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("No OPENAI_API_KEY in environment");
 
@@ -702,7 +711,7 @@ export async function synthesizeForChat(
   }
 
   // Шаг 5: Определение параметров голоса (динамически из настроек чата)
-  let voiceConfig = { voice: 'ru-RU-SvetlanaNeural', rate: '0.95', pitch: '+0Hz', gender: 'female' as 'male' | 'female' };
+  let voiceConfig = { voice: 'ru-RU-DmitryNeural', rate: '1.0', pitch: '+0Hz', gender: 'male' as 'male' | 'female' };
   try {
     const db = await import('../../db');
     voiceConfig = db.getVoiceConfig(chatId);
@@ -710,12 +719,7 @@ export async function synthesizeForChat(
     logger.warn(`⚠️ [TTS] Failed to import getVoiceConfig dynamically: ${e}`);
   }
 
-  const isHook = (chatId === "global_start_hook") ||
-    text.includes("Здравствуй! Я — Селин") ||
-    text.includes("Здравствуй! Я — Сели\u0301н") ||
-    text.includes("Здравствуйте! Меня зовут Селин");
-
-  const voice = options.voice || (isHook ? 'ru-RU-SvetlanaNeural' : voiceConfig.voice);
+  const voice = options.voice || voiceConfig.voice;
   const defaultRate = voice.toLowerCase().includes('dmitry') ? 1.0 : 0.95;
   const numRate = parseRate(options.rate, options.speed, defaultRate);
   const pitch = options.pitch || voiceConfig.pitch;

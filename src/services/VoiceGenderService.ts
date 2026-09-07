@@ -19,14 +19,6 @@ export function detectGenderAndSet(chatId: string | number, text: string): 'fema
     'ты же женщина', 'обращайся как к женщине', 'селин, ты какая'
   ];
   
-  // Мужские маркеры
-  const maleMarkers = [
-    'красивый', 'умный', 'мой', 'помощник', 'сказал', 'смог', 'сделал',
-    'брат', 'друг', 'ты же мужчина'
-  ];
-  
-  let detected: 'female' | 'male' | 'none' = 'none';
-  
   // Функция проверки наличия маркера как отдельного слова или точной фразы
   const hasMarker = (marker: string): boolean => {
     if (marker.includes(' ')) {
@@ -38,21 +30,14 @@ export function detectGenderAndSet(chatId: string | number, text: string): 'fema
   };
   
   const hasFemale = femaleMarkers.some(hasMarker);
-  const hasMale = maleMarkers.some(hasMarker);
   
-  if (hasFemale && !hasMale) {
-    detected = 'female';
-  } else if (hasMale && !hasFemale) {
-    detected = 'male';
-  }
+  const detected: 'female' | 'male' = hasFemale ? 'female' : 'male';
   
-  if (detected !== 'none') {
-    setVoiceGender(cleanId, detected, 0); // 0 значит не зафиксирован принудительно
-    const voiceName = detected === 'female' ? 'Svetlana' : 'Dmitry';
-    const logMsg = `[VoiceGender] chat=${cleanId} detected=${detected} voice=${voiceName}`;
-    console.log(logMsg);
-    logger.info(logMsg);
-  }
+  setVoiceGender(cleanId, detected, 0); // 0 значит не зафиксирован принудительно
+  const voiceName = detected === 'female' ? 'Svetlana' : 'Dmitry';
+  const logMsg = `[VoiceGender] chat=${cleanId} detected=${detected} voice=${voiceName}`;
+  console.log(logMsg);
+  logger.info(logMsg);
   
   return detected;
 }

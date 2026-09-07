@@ -91,7 +91,7 @@ async function getBufferDurationSec(buffer: Buffer): Promise<number> {
  * Пересоздание аудио приветствия:
  * 1. Удаляет старый assets/start_hook.mp3
  * 2. Сбрасывает in-memory кэш ([StartHook] cached in memory)
- * 3. Синтезирует заново с мужским спокойным голосом (ru-RU-DmitryNeural), rate = 0.85, pitch стандартный ("+0Hz")
+ * 3. Синтезирует заново с мужским спокойным голосом (ru-RU-DmitryNeural), rate = 1.0, pitch стандартный ("+0Hz")
  * 4. Сохраняет в assets и обновляет кэш
  * Лог: [StartHook] приветствие пересоздано, длительность {N} сек.
  */
@@ -123,11 +123,11 @@ export async function recreateStartHookAudio(): Promise<Buffer | null> {
     console.log(logTtsStr);
     logger.info(logTtsStr);
 
-    // 6. Синтез заново с настройками чёткости: rate = 0.95, голос женский ru-RU-SvetlanaNeural
+    // 6. Синтез заново с настройками чёткости: rate = 1.0, голос мужской ru-RU-DmitryNeural
     const synth = await ttsService.synthesize(tts_string, {
-      voice: "ru-RU-SvetlanaNeural",
-      rate: 0.95,
-      speed: 0.95,
+      voice: "ru-RU-DmitryNeural",
+      rate: 1.0,
+      speed: 1.0,
       pitch: "+0Hz",
       isStartHook: true,
       skipStress: true

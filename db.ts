@@ -330,7 +330,7 @@ export function initDataStore() {
 
 export function getVoiceGender(chatId?: string | number | null): 'male' | 'female' {
   if (!chatId) {
-    return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'female';
+    return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'male';
   }
   const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
   if (sqliteDb) {
@@ -343,7 +343,7 @@ export function getVoiceGender(chatId?: string | number | null): 'male' | 'femal
       logger.warn(`⚠️ [voice_prefs] Error getting voice gender: ${e}`);
     }
   }
-  return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'female';
+  return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'male';
 }
 
 export function setVoiceGender(chatId: string | number, gender: 'male' | 'female', fixed: number = 0): void {
