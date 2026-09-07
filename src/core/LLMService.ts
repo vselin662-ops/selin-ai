@@ -254,12 +254,55 @@ export function markOk(provider: string) {
 
 export function markFail(provider: string, error?: any) {
   const errStr = String(error?.message || error || 'Unknown error');
+  let blockDurationMs = 5 * 60 * 1000; // default 5 min for 5xx/timeout/other
+  if (errStr.includes('429')) {
+    blockDurationMs = 60 * 1000; // 60 sec for rate limit (429)
+  } else if (errStr.includes('402') || errStr.toLowerCase().includes('invalid key') || errStr.toLowerCase().includes('auth') || errStr.toLowerCase().includes('unauthorized') || errStr.toLowerCase().includes('api key')) {
+    blockDurationMs = 60 * 60 * 1000; // 60 min for payment/auth/invalid key
+  }
   blockState.set(provider, {
-    blockedUntil: Date.now() + TEN_MINUTES_MS,
+    blockedUntil: Date.now() + blockDurationMs,
     reason: errStr
   });
-  logger.warn(`🛑 [CircuitBreaker] Provider ${provider} blocked for 10 minutes: ${errStr}`);
+  logger.warn(`🛑 [CircuitBreaker] Provider ${provider} blocked for ${blockDurationMs / 1000}s: ${errStr}`);
 }
+
+// Canary Health Check interval (every 10 minutes)
+setInterval(async () => {
+  const testProviders = ['groq', 'openrouter', 'gemini', 'teamo'];
+  for (const provName of testProviders) {
+    try {
+      let alive = false;
+      if (provName === 'groq') {
+        const key = process.env.GROQ_API_KEY;
+        alive = !!(key && !key.includes('your_') && key.length > 10);
+      } else if (provName === 'openrouter') {
+        const key = process.env.OPENROUTER_API_KEY;
+        alive = !!(key && !key.includes('your_') && key.length > 10);
+      } else if (provName === 'gemini') {
+        const key = process.env.GEMINI_API_KEY;
+        alive = !!(key && !key.includes('your_') && key.length > 10);
+      } else if (provName === 'teamo') {
+        const key = process.env.TEAMO_API_KEY;
+        alive = !!(key && !key.includes('your_') && key.length > 10);
+      }
+
+      if (alive) {
+        markOk(provName);
+        console.log(`[Canary] provider=${provName} alive`);
+        logger.info(`[Canary] provider=${provName} alive`);
+      } else {
+        markFail(provName, new Error("Canary check: missing or invalid key"));
+        console.log(`[Canary] provider=${provName} dead`);
+        logger.warn(`[Canary] provider=${provName} dead`);
+      }
+    } catch (e: any) {
+      markFail(provName, e);
+      console.log(`[Canary] provider=${provName} dead`);
+      logger.warn(`[Canary] provider=${provName} dead`);
+    }
+  }
+}, 10 * 60 * 1000).unref();
 
 // Global request counter for Router diagnostics
 export let globalLlmReqCounter = 0;
@@ -750,27 +793,33 @@ ${identityBlock}
       }))
     ] as any;
 
-    // === ROUTING CHAIN (groq → gemini → teamo → openrouter) ===
+    // === ROUTING CHAIN (groq → openrouter → gemini → teamo) ===
     const reqId = ++globalLlmReqCounter;
     const startTime = Date.now();
     const failedList: string[] = [];
     let responseText: string | null = null;
     let successfulProvider: string | null = null;
 
-    // Ordered list of providers
+    // Ordered list of providers: groq -> openrouter -> gemini -> teamo
     const providersToTry = [
       { name: 'groq', call: () => this.callGroq(messages) },
+      { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
       { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
-      { name: 'teamo', call: () => this.callTeamo(messages) },
-      { name: 'openrouter', call: () => this.callOpenRouterChain(messages) }
+      { name: 'teamo', call: () => this.callTeamo(messages) }
     ];
 
     const hasUnblocked = providersToTry.some(p => !isBlocked(p.name));
 
     for (const prov of providersToTry) {
+      // Check total query budget (20s)
+      if (Date.now() - startTime > 20000) {
+        logger.warn(`[Router] req=${reqId} total budget 20s exceeded, stopping cascade`);
+        break;
+      }
+
       if (hasUnblocked && isBlocked(prov.name)) {
         failedList.push(`${prov.name} (blocked)`);
-        const blockLog = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=провайдер заблокирован (10 мин ban) задержка=0ms`;
+        const blockLog = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=провайдер заблокирован задержка=0ms`;
         console.warn(blockLog);
         logger.warn(blockLog);
         continue;
@@ -781,9 +830,9 @@ ${identityBlock}
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // 12s timeout per provider call
+        // 8s timeout per provider call
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Timeout 12s exceeded")), 12000);
+          setTimeout(() => reject(new Error("Timeout 8s exceeded")), 8000);
         });
         const res = await Promise.race([prov.call(), timeoutPromise]);
         const latency = Date.now() - provStart;

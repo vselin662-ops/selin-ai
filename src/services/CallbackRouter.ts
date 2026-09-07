@@ -352,6 +352,39 @@ export async function handleCallback(
     };
   }
 
+  // ЗАДАЧА 3: Обработчики кнопок, содержащих slot, voice, tz, plan -> запись в SQLite -> возврат "✅ Обновлено." без LLM
+  if (lower.includes('slot') || lower.includes('voice') || lower.includes('tz') || lower.includes('plan') || lower.startsWith('plan_')) {
+    const cfg = getUserPlanConfig(cleanId);
+    if (lower === 'plan_time_m') {
+      const nextTime = getNextSlotTime(cfg.slot_times.m, MORNING_SLOT_OPTIONS);
+      updateUserPlanConfig(cleanId, { slot_times: { ...cfg.slot_times, m: nextTime } });
+    } else if (lower === 'plan_time_n') {
+      const nextTime = getNextSlotTime(cfg.slot_times.n, NOON_SLOT_OPTIONS);
+      updateUserPlanConfig(cleanId, { slot_times: { ...cfg.slot_times, n: nextTime } });
+    } else if (lower === 'plan_time_e') {
+      const nextTime = getNextSlotTime(cfg.slot_times.e, EVENING_SLOT_OPTIONS);
+      updateUserPlanConfig(cleanId, { slot_times: { ...cfg.slot_times, e: nextTime } });
+    } else if (lower === 'plan_tz') {
+      const nextTz = getNextRfTimezone(cfg.tz);
+      updateUserPlanConfig(cleanId, { tz: nextTz.id });
+    } else if (lower === 'plan_voice' || lower === 'plan_toggle_voice' || lower === 'plan_voice_on' || lower === 'plan_voice_off') {
+      let nextVoice = cfg.voice_on !== 0 ? 0 : 1;
+      if (lower === 'plan_voice_on') nextVoice = 1;
+      if (lower === 'plan_voice_off') nextVoice = 0;
+      updateUserPlanConfig(cleanId, { voice_on: nextVoice });
+    } else if (lower === 'plan_on') {
+      setPlanStatus(cleanId, 'on_buttons');
+      updateUserPlanConfig(cleanId, { plan_status: 'on_buttons', plan_enabled: 1 });
+    } else if (lower === 'plan_off') {
+      setPlanStatus(cleanId, 'off');
+      updateUserPlanConfig(cleanId, { plan_status: 'off', plan_enabled: 0 });
+    }
+    return {
+      handled: true,
+      replyText: '✅ Обновлено.'
+    };
+  }
+
   // === 2. БРИФИНГ ===
   if (
     lower === 'brief_open' ||

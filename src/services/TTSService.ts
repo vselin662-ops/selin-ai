@@ -158,7 +158,11 @@ export class TTSService {
 
     // Попытка 1: MsEdgeTTS library (WebSocket)
     try {
-      audioBuffer = await this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch);
+      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
+      });
+      audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
       if (audioBuffer) {
         contentType = 'audio/mpeg';
         ttsRequestsTotal.inc({ engine: 'edge-library' });
@@ -317,8 +321,10 @@ export class TTSService {
             config: {
               responseModalities: ['AUDIO'],
               speechConfig: {
-                voice: {
-                  name: 'Kore'
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: 'Kore'
+                  }
                 }
               }
             } as any
