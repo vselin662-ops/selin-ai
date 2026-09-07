@@ -140,10 +140,6 @@ export class TTSService {
     const sanitizedText = sanitizeForTTS(text, options.skipStress);
     const cleanText = sanitizedText.trim();
     let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
-    if (voice.toLowerCase().includes('svetlana') || voice.toLowerCase().includes('female')) {
-      logger.warn("⚠️ [TTS] Female voice detected. Forcing male voice DmitryNeural.");
-      voice = 'ru-RU-DmitryNeural';
-    }
 
     // Дефолт для ВСЕХ голосовых сообщений rate = 0.9 (10% медленнее)
     const numRate = parseRate(options.rate, options.speed, 0.9);
@@ -407,14 +403,24 @@ export class TTSService {
     const audioChunks: Buffer[] = [];
 
     let selectedVoice = voice.includes('Neural') ? voice : (process.env.TTS_VOICE || 'ru-RU-DmitryNeural');
-    if (selectedVoice.toLowerCase().includes('svetlana') || selectedVoice.toLowerCase().includes('female')) {
-      selectedVoice = 'ru-RU-DmitryNeural';
-    }
 
     for (const chunk of chunks) {
       if (!chunk.trim()) continue;
       const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk);
-      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}'>${ssmlChunk}</prosody></voice></speak>`;
+      let finalSsmlChunk = ssmlChunk;
+      
+      // Для мужского голоса DmitryNeural убираем все паузы <break> длиннее 150ms
+      if (selectedVoice.toLowerCase().includes('dmitry')) {
+        finalSsmlChunk = ssmlChunk.replace(/<break\s+time=["'](\d+)ms["']\s*\/?>/g, (match, p1) => {
+          const duration = parseInt(p1, 10);
+          if (duration > 150) {
+            return '<break time="150ms"/>';
+          }
+          return match;
+        });
+      }
+      
+      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}'>${finalSsmlChunk}</prosody></voice></speak>`;
 
       const response = await fetch('https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4', {
         method: 'POST',
@@ -584,18 +590,24 @@ export async function synthesizeForChat(
     }
   }
 
-  // Шаг 5: Фолбэк на нейронный Edge TTS (ru-RU-DmitryNeural) при ошибке или отсутствии ключа
-  let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
-  if (voice.toLowerCase().includes('svetlana') || voice.toLowerCase().includes('female')) {
-    voice = 'ru-RU-DmitryNeural';
+  // Шаг 5: Определение параметров голоса (динамически из настроек чата)
+  let voiceConfig = { voice: 'ru-RU-SvetlanaNeural', rate: '0.95', pitch: '+0Hz', gender: 'female' as 'male' | 'female' };
+  try {
+    const db = await import('../../db');
+    voiceConfig = db.getVoiceConfig(chatId);
+  } catch (e) {
+    logger.warn(`⚠️ [TTS] Failed to import getVoiceConfig dynamically: ${e}`);
   }
 
   const isHook = (chatId === "global_start_hook") ||
     text.includes("Здравствуй! Я — Селин") ||
-    text.includes("Здравствуй! Я — Сели\u0301н");
-  const defaultRate = isHook ? 0.85 : 0.9;
+    text.includes("Здравствуй! Я — Сели\u0301н") ||
+    text.includes("Здравствуйте! Меня зовут Селин");
+
+  let voice = options.voice || (isHook ? 'ru-RU-SvetlanaNeural' : voiceConfig.voice);
+  const defaultRate = isHook ? 0.95 : parseFloat(voiceConfig.rate);
   const numRate = parseRate(options.rate, options.speed, defaultRate);
-  const pitch = options.pitch || '+0Hz';
+  const pitch = options.pitch || voiceConfig.pitch;
 
   if (!audioBuffer) {
     engine = 'Edge';

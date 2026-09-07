@@ -1961,6 +1961,28 @@ export class MaxAdapter {
         return res.status(200).send('ok');
       }
 
+      // Запуск адаптивного детектора пола обращения
+      try {
+        const { detectGenderAndSet } = await import("../services/VoiceGenderService");
+        detectGenderAndSet(cleanId, text);
+      } catch (detectErr) {
+        logger.warn(`⚠️ [VoiceGender] Error running detector: ${detectErr}`);
+      }
+
+      // Команды владельца для принудительной фиксации голоса
+      const lowerTrimmed = text.trim().toLowerCase();
+      if (isOwner(cleanId) && (lowerTrimmed === 'голос: муж' || lowerTrimmed === 'голос: жен' || lowerTrimmed === 'голос:муж' || lowerTrimmed === 'голос:жен')) {
+        const targetGender = (lowerTrimmed.includes('муж')) ? 'male' : 'female';
+        setVoiceGender(cleanId, targetGender, 1); // 1 = принудительно зафиксирован!
+        const reply = `Голос принудительно зафиксирован: ${targetGender === 'male' ? 'Мужской (Dmitry)' : 'Женский (Svetlana)'}.`;
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, reply);
+        } else {
+          await this.safeSendMessageToChat(cleanId, reply);
+        }
+        return res.status(200).send('ok');
+      }
+
       // 2. Команда 'статистика' от OWNER
       if (isOwner(cleanId) && lowerText === 'статистика') {
         const { getOwnerStatistics } = await import("../utils/stats");

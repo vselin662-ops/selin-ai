@@ -123,11 +123,11 @@ export async function recreateStartHookAudio(): Promise<Buffer | null> {
     console.log(logTtsStr);
     logger.info(logTtsStr);
 
-    // 6. Синтез заново с настройками чёткости: rate = 0.85, голос мужской спокойный ru-RU-DmitryNeural
+    // 6. Синтез заново с настройками чёткости: rate = 0.95, голос женский ru-RU-SvetlanaNeural
     const synth = await ttsService.synthesize(tts_string, {
-      voice: "ru-RU-DmitryNeural",
-      rate: 0.85,
-      speed: 0.85,
+      voice: "ru-RU-SvetlanaNeural",
+      rate: 0.95,
+      speed: 0.95,
       pitch: "+0Hz",
       isStartHook: true,
       skipStress: true

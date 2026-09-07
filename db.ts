@@ -261,7 +261,9 @@ try {
 
     CREATE TABLE IF NOT EXISTS voice_prefs (
       chat_id TEXT PRIMARY KEY,
-      gender TEXT DEFAULT 'male'
+      gender TEXT DEFAULT 'female',
+      fixed INTEGER DEFAULT 0,
+      updated_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS style_memory (
@@ -286,6 +288,21 @@ try {
     CREATE INDEX IF NOT EXISTS idx_subscriptions_chat ON subscriptions(chat_id);
     CREATE INDEX IF NOT EXISTS idx_payments_chat ON payments(chat_id, created_at);
   `);
+
+  // Safe migration for voice_prefs columns
+  try {
+    const columns = sqliteDb.pragma("table_info(voice_prefs)");
+    const hasFixed = columns.some((col: any) => col.name === "fixed");
+    if (!hasFixed) {
+      sqliteDb.exec("ALTER TABLE voice_prefs ADD COLUMN fixed INTEGER DEFAULT 0");
+    }
+    const hasUpdatedAt = columns.some((col: any) => col.name === "updated_at");
+    if (!hasUpdatedAt) {
+      sqliteDb.exec("ALTER TABLE voice_prefs ADD COLUMN updated_at TEXT");
+    }
+  } catch (e) {
+    logger.warn(`⚠️ [voice_prefs] Migration error: ${e}`);
+  }
 
   // Safe migration for adding tenant_id to pre-existing tables if created without it
   const tablesToMigrate = ["chats", "knowledge_base", "kb_documents", "kb_chunks", "moderation_queue", "moderation_log", "feed"];
@@ -312,29 +329,68 @@ export function initDataStore() {
 }
 
 export function getVoiceGender(chatId?: string | number | null): 'male' | 'female' {
-  return 'male';
+  if (!chatId) {
+    return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'female';
+  }
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
+  if (sqliteDb) {
+    try {
+      const row = sqliteDb.prepare("SELECT gender FROM voice_prefs WHERE chat_id = ?").get(cleanId);
+      if (row && row.gender) {
+        return row.gender as 'male' | 'female';
+      }
+    } catch (e) {
+      logger.warn(`⚠️ [voice_prefs] Error getting voice gender: ${e}`);
+    }
+  }
+  return (process.env.VOICE_DEFAULT as 'male' | 'female') || 'female';
 }
 
-export function setVoiceGender(chatId: string | number, gender: 'male' | 'female'): void {
+export function setVoiceGender(chatId: string | number, gender: 'male' | 'female', fixed: number = 0): void {
   if (!chatId) return;
   const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
   if (sqliteDb) {
     try {
-      sqliteDb.prepare("INSERT OR REPLACE INTO voice_prefs (chat_id, gender) VALUES (?, ?)").run(cleanId, 'male');
-      logger.info(`🎙️ [voice_prefs] Set gender for chat ${cleanId} to male`);
+      const now = new Date().toISOString();
+      sqliteDb.prepare("INSERT OR REPLACE INTO voice_prefs (chat_id, gender, fixed, updated_at) VALUES (?, ?, ?, ?)").run(cleanId, gender, fixed, now);
+      logger.info(`🎙️ [voice_prefs] Set gender for chat ${cleanId} to ${gender} (fixed: ${fixed})`);
     } catch (e) {
       logger.warn(`⚠️ [voice_prefs] Error setting voice gender: ${e}`);
     }
   }
 }
 
+export function isVoiceGenderFixed(chatId?: string | number | null): boolean {
+  if (!chatId) return false;
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
+  if (sqliteDb) {
+    try {
+      const row = sqliteDb.prepare("SELECT fixed FROM voice_prefs WHERE chat_id = ?").get(cleanId);
+      return !!(row && row.fixed);
+    } catch (e) {
+      logger.warn(`⚠️ [voice_prefs] Error checking fixed status: ${e}`);
+    }
+  }
+  return false;
+}
+
 export function getVoiceConfig(chatId?: string | number | null): { voice: string; rate: string; pitch: string; gender: 'male' | 'female' } {
-  return {
-    voice: 'ru-RU-DmitryNeural',
-    rate: '-10%',
-    pitch: '+0Hz',
-    gender: 'male'
-  };
+  const gender = getVoiceGender(chatId);
+  if (gender === 'female') {
+    return {
+      voice: 'ru-RU-SvetlanaNeural',
+      rate: '0.95',
+      pitch: '+0Hz',
+      gender: 'female'
+    };
+  } else {
+    return {
+      voice: 'ru-RU-DmitryNeural',
+      rate: '1.0',
+      pitch: '+0Hz',
+      gender: 'male'
+    };
+  }
 }
 
 export { sqliteDb };
