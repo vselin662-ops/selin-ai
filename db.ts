@@ -287,6 +287,15 @@ try {
     CREATE INDEX IF NOT EXISTS idx_biz_tasks_tenant ON business_tasks(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_subscriptions_chat ON subscriptions(chat_id);
     CREATE INDEX IF NOT EXISTS idx_payments_chat ON payments(chat_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS image_cache (
+      prompt_hash TEXT PRIMARY KEY,
+      english_prompt TEXT NOT NULL,
+      upload_token TEXT,
+      mime_type TEXT,
+      image_base64 TEXT,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Safe migration for voice_prefs columns

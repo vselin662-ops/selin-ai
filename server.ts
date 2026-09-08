@@ -389,6 +389,14 @@ async function startServer() {
       } catch (err: any) {
         logger.warn(`⚠️ [StartHook] Server startup pre-generation error: ${err?.message || err}`);
       }
+
+      // Run Image Generation Self-Test (asynchronously)
+      try {
+        const { runImageGenSelfTest } = await import("./src/adapters/MaxAdapter");
+        await runImageGenSelfTest();
+      } catch (err: any) {
+        logger.error(`❌ [ImageGen Self-Test] Startup check failed: ${err?.message || err}`);
+      }
     })();
   });
 
