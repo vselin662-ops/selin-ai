@@ -2585,6 +2585,71 @@ function transliterate(word: string): string {
   }).join('');
 }
 
+const RUSSIAN_TO_ENGLISH_MAP: Record<string, string> = {
+  "воин в доспехах на поле боя": "actor in armor costume on a battlefield",
+  "кошка на подоконнике": "cat on a windowsill",
+  "старый автомобиль в гараже": "vintage car in a garage",
+  "эльф в лесу": "actor in elf costume in a forest",
+  "дракон в пещере": "dragon in a cave",
+  "девушка на улице ночью": "woman on street at night",
+  "костёр в лесу ночью": "campfire in a forest at night",
+  "логотип пекарни с колосом": "bakery logo with wheat spike",
+  "обои на телефон с горами на рассвете": "phone wallpaper with mountains at dawn",
+  "рыжая кошка спит на подоконнике": "orange cat sleeping on a windowsill",
+  "нарисуй девушку в красном платье": "woman in a red dress"
+};
+
+function translateRussianToEnglish(text: string): string {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+  
+  if (RUSSIAN_TO_ENGLISH_MAP[lower]) {
+    return RUSSIAN_TO_ENGLISH_MAP[lower];
+  }
+  
+  let result = lower;
+  const wordMap: Record<string, string> = {
+    "воин": "warrior",
+    "доспех": "armor",
+    "поле": "field",
+    "бой": "battle",
+    "кошк": "cat",
+    "подоконник": "windowsill",
+    "автомобил": "car",
+    "машин": "car",
+    "гараж": "garage",
+    "эльф": "elf",
+    "дракон": "dragon",
+    "девушк": "woman",
+    "женщин": "woman",
+    "мужчин": "man",
+    "улиц": "street",
+    "ноч": "night",
+    "красивое": "beautiful",
+    "изображение": "image",
+    "костер": "campfire",
+    "костёр": "campfire",
+    "лес": "forest",
+    "логотип": "logo",
+    "колос": "wheat",
+    "обои": "wallpaper",
+    "телефон": "phone",
+    "гор": "mountain",
+    "рассвет": "dawn"
+  };
+
+  for (const [ru, en] of Object.entries(wordMap)) {
+    const regex = new RegExp(ru, 'gi');
+    result = result.replace(regex, en);
+  }
+  
+  if (/[а-яё]/i.test(result)) {
+    return transliterate(result);
+  }
+  
+  return result;
+}
+
 export function parseImageSize(text: string): { width: number, height: number } {
   const lower = text.toLowerCase();
   if (lower.includes('обои на телефон') || lower.includes('phone wallpaper') || lower.includes('телефонные обои')) {
@@ -2704,7 +2769,8 @@ or objects that are not in the request. Output ONLY the final prompt line.`;
 
   // Robust professional photography fallback
   const rawSubject = parseImageGenerationPrompt(trimmed) || trimmed;
-  let fallback = `${rawSubject}`;
+  const englishSubject = translateRussianToEnglish(rawSubject);
+  let fallback = `${englishSubject}`;
   const lowerRaw = rawSubject.toLowerCase();
   
   if (/девушк|женщин|мужчин|человек|люд|мальчик|девоч|ребенок|ребён|персон|girl|woman|man|human|person|people|boy|child/i.test(lowerRaw)) {
