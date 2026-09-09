@@ -2761,10 +2761,10 @@ or objects that are not in the request. Output ONLY the final prompt line.`;
         return resultText;
       }
     } else {
-      logger.warn(`⚠️ [ImageGen] Pollinations Text POST returned status ${response.status}`);
+      logger.info(`[ImageGen] Pollinations Text POST returned status ${response.status}`);
     }
   } catch (err: any) {
-    logger.warn(`⚠️ [ImageGen] Pollinations Text POST failed: ${err?.message || err}. Using fallback.`);
+    logger.info(`[ImageGen] Pollinations Text POST failed: ${err?.message || err}. Using fallback.`);
   }
 
   // Robust professional photography fallback

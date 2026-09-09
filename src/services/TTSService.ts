@@ -253,31 +253,31 @@ export class TTSService {
     let audioBuffer: Buffer | null = null;
     let contentType = 'audio/mpeg';
 
-    // Попытка 1: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
+    // Попытка 1: MsEdgeTTS library (WebSocket) — наиболее стабильная и стандартная
     try {
-      audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
+      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
+      });
+      audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
       if (audioBuffer) {
         contentType = 'audio/mpeg';
-        ttsRequestsTotal.inc({ engine: 'edge-direct' });
+        ttsRequestsTotal.inc({ engine: 'edge-library' });
       }
     } catch (err: any) {
-      logger.warn(`⚠️ [TTSService] Direct fetch Edge TTS failed (falling back): ${err?.message || err}`);
+      logger.info(`[TTSService] Library MsEdgeTTS failed: ${err?.message || err}. Trying direct fetch...`);
     }
 
-    // Попытка 2: MsEdgeTTS library (WebSocket)
+    // Попытка 2: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
     if (!audioBuffer) {
       try {
-        const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
-        });
-        audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
+        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
         if (audioBuffer) {
           contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'edge-library' });
+          ttsRequestsTotal.inc({ engine: 'edge-direct' });
         }
       } catch (err: any) {
-        logger.warn(`[TTSService] Library MsEdgeTTS failed: ${err?.message || err}.`);
+        logger.info(`[TTSService] Direct fetch Edge TTS failed (falling back): ${err?.message || err}`);
       }
     }
 
@@ -290,7 +290,7 @@ export class TTSService {
           ttsRequestsTotal.inc({ engine: 'google' });
         }
       } catch (err: any) {
-        logger.warn(`[TTSService] Google TTS failed: ${err?.message || err}`);
+        logger.info(`[TTSService] Google TTS failed: ${err?.message || err}`);
       }
     }
 
@@ -303,7 +303,7 @@ export class TTSService {
           ttsRequestsTotal.inc({ engine: 'openai' });
         }
       } catch (err: any) {
-        logger.warn(`[TTSService] OpenAI TTS failed: ${err?.message || err}`);
+        logger.info(`[TTSService] OpenAI TTS failed: ${err?.message || err}`);
       }
     }
 
@@ -316,7 +316,7 @@ export class TTSService {
           ttsRequestsTotal.inc({ engine: 'gemini' });
         }
       } catch (err: any) {
-        logger.warn(`[TTSService] Gemini TTS failed: ${err?.message || err}`);
+        logger.info(`[TTSService] Gemini TTS failed: ${err?.message || err}`);
       }
     }
 
