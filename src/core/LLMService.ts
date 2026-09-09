@@ -370,7 +370,9 @@ export const FALLBACK_PHRASE = "Я временно потерял нить. П�
 
 export class LLMService {
   private gemini: GoogleGenAI | null = null;
+  private currentGeminiApiKey: string | null = null;
   private groq: Groq | null = null;
+  private currentGroqApiKey: string | null = null;
   private chatMemories: LRUCache<string, ChatMemory>;
 
   constructor(geminiApiKey?: string, groqApiKey?: string) {
@@ -381,6 +383,7 @@ export class LLMService {
     const gKey = geminiApiKey || process.env.GEMINI_API_KEY;
     if (gKey && !gKey.includes('your_') && !gKey.includes('placeholder') && gKey.length > 10) {
       this.gemini = new GoogleGenAI({ apiKey: gKey });
+      this.currentGeminiApiKey = gKey;
     } else {
       logger.warn("⚠️ GEMINI_API_KEY is not defined or is placeholder in LLMService environment.");
     }
@@ -388,6 +391,7 @@ export class LLMService {
     const grKey = groqApiKey || process.env.GROQ_API_KEY;
     if (grKey && !grKey.includes('your_') && !grKey.includes('placeholder') && grKey.length > 10) {
       this.groq = new Groq({ apiKey: grKey });
+      this.currentGroqApiKey = grKey;
     } else {
       logger.warn("⚠️ GROQ_API_KEY is not defined or is placeholder in LLMService environment.");
     }
@@ -395,13 +399,28 @@ export class LLMService {
     logger.info('🧠 [LLM] primary: ' + PRIMARY_PROVIDER + '/' + PRIMARY_MODEL);
   }
 
+  private getGeminiClient(): GoogleGenAI | null {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
+      return null;
+    }
+    if (!this.gemini || this.currentGeminiApiKey !== apiKey) {
+      this.gemini = new GoogleGenAI({ apiKey });
+      this.currentGeminiApiKey = apiKey;
+      markOk('gemini'); // Clear circuit breaker block when key is updated
+    }
+    return this.gemini;
+  }
+
   private getGroqClient(): Groq | null {
-    if (!this.groq) {
-      const apiKey = process.env.GROQ_API_KEY;
-      if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
-        return null;
-      }
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
+      return null;
+    }
+    if (!this.groq || this.currentGroqApiKey !== apiKey) {
       this.groq = new Groq({ apiKey });
+      this.currentGroqApiKey = apiKey;
+      markOk('groq'); // Clear circuit breaker block when key is updated
     }
     return this.groq;
   }
@@ -425,8 +444,9 @@ export class LLMService {
     }
 
     try {
-      if (this.gemini) {
-        const completion = await this.gemini.models.generateContent({
+      const gemini = this.getGeminiClient();
+      if (gemini) {
+        const completion = await gemini.models.generateContent({
           model: GEMINI_MODEL,
           contents: [{ role: 'user', parts: [{ text: userMessage }] }],
           config: {
@@ -463,8 +483,9 @@ export class LLMService {
     }
 
     try {
-      if (this.gemini) {
-        const completion = await this.gemini.models.generateContent({
+      const gemini = this.getGeminiClient();
+      if (gemini) {
+        const completion = await gemini.models.generateContent({
           model: GEMINI_MODEL,
           contents: [{ role: 'user', parts: [{ text: userMessage }] }],
           config: {
@@ -929,7 +950,8 @@ ${identityBlock}
       }
     }
 
-    if (this.gemini) {
+    const gemini = this.getGeminiClient();
+    if (gemini) {
       try {
         let systemInstruction = "";
         const formattedContents: any[] = [];
@@ -951,7 +973,7 @@ ${identityBlock}
           config.systemInstruction = systemInstruction;
         }
 
-        const completion = await this.gemini.models.generateContent({
+        const completion = await gemini.models.generateContent({
           model: GEMINI_MODEL,
           contents: formattedContents,
           config: config
@@ -1063,7 +1085,8 @@ ${identityBlock}
         }
       }
 
-      if (this.gemini) {
+      const gemini = this.getGeminiClient();
+      if (gemini) {
         try {
           let formattedContents = contents;
           if (Array.isArray(contents)) {
@@ -1104,7 +1127,7 @@ ${identityBlock}
             geminiConfig.tools = cfg.tools;
           }
 
-          const response = await this.gemini.models.generateContent({
+          const response = await gemini.models.generateContent({
             model: GEMINI_MODEL,
             contents: formattedContents,
             config: geminiConfig
@@ -1347,12 +1370,9 @@ ${identityBlock}
   }
 
   private async callGemini(messages: any[], systemPrompt: string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
-      throw new Error("GEMINI_API_KEY is not configured");
-    }
-    if (!this.gemini) {
-      this.gemini = new GoogleGenAI({ apiKey });
+    const gemini = this.getGeminiClient();
+    if (!gemini) {
+      throw new Error("GEMINI_API_KEY is not configured or invalid");
     }
     const contents: any[] = [];
     for (const m of messages) {
@@ -1365,7 +1385,7 @@ ${identityBlock}
     if (contents.length === 0) {
       contents.push({ role: 'user', parts: [{ text: 'Привет' }] });
     }
-    const completion = await this.gemini.models.generateContent({
+    const completion = await gemini.models.generateContent({
       model: GEMINI_MODEL,
       contents: contents,
       config: {
