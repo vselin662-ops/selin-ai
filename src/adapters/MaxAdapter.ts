@@ -9,7 +9,7 @@ import { VoiceService } from "../services/VoiceService";
 import { synthesizeForChat } from "../services/TTSService";
 import { HOOK_TEXT, VOICE_HOOK_TEXT, getStartHookAudio } from "../services/StartHookService";
 import { ensureMp3Buffer } from "../lib/audioConvert";
-import { callVision, stripMarkdown } from "../core/LLMService";
+import { llmService, callVision, stripMarkdown } from "../core/LLMService";
 import { sqliteDb, getVoiceConfig, setVoiceGender } from "../../db";
 import { isOwner } from "../fintech/subscriptions";
 import { maskPII } from "../utils/security";
@@ -1435,7 +1435,27 @@ export class MaxAdapter {
       if (isVoiceInput && audioUrlOrToken) {
         try {
           const audioBuffer = await this.downloadAudio(audioUrlOrToken);
-          const transcribedText = await this.transcribeAudio(audioBuffer);
+          let transcribedText = "";
+          
+          const isTenantEnabledSetting = sqliteDb && (() => {
+            try {
+              const row = sqliteDb.prepare("SELECT value FROM system_settings WHERE key = 'TENANT_ENABLED'").get() as any;
+              return row && row.value === '1';
+            } catch { return false; }
+          })();
+
+          if (isTenantEnabledSetting) {
+            const bindRow = sqliteDb.prepare("SELECT * FROM user_binds WHERE channel = 'max' AND channel_user_id = ?").get(cleanId);
+            if (bindRow) {
+              const { transcribeLongAudio } = await import("../services/longVoice");
+              transcribedText = await transcribeLongAudio(audioBuffer, (buf) => this.transcribeAudio(buf));
+            }
+          }
+
+          if (!transcribedText) {
+            transcribedText = await this.transcribeAudio(audioBuffer);
+          }
+
           if (transcribedText && transcribedText.trim()) {
             text = transcribedText.trim();
             logger.info(`📝 Распознано: "${text}"`);
@@ -1449,6 +1469,99 @@ export class MaxAdapter {
           return res.status(200).send('ok');
         }
       }
+
+      // ==========================================
+      // TENANT HOOK (TASK 4)
+      // ==========================================
+      const isTenantEnabledSetting = sqliteDb && (() => {
+        try {
+          const row = sqliteDb.prepare("SELECT value FROM system_settings WHERE key = 'TENANT_ENABLED'").get() as any;
+          return row && row.value === '1';
+        } catch { return false; }
+      })();
+
+      if (isTenantEnabledSetting) {
+        const bindRow = sqliteDb.prepare("SELECT * FROM user_binds WHERE channel = 'max' AND channel_user_id = ?").get(cleanId) as { user_id: string } | undefined;
+        if (bindRow) {
+          const tenantId = bindRow.user_id;
+          
+          // 1. Check if start/welcome is triggered
+          const trimmedLowerText = (text || '').trim().toLowerCase();
+          const isStartTrigger = 
+            raw.update_type === 'bot_started' || 
+            raw.update_type === 'start' ||
+            String(raw.event || '').toLowerCase() === 'bot_started' || 
+            String(raw.body?.event || '').toLowerCase() === 'bot_started' || 
+            String(raw.payload?.event || '').toLowerCase() === 'bot_started' || 
+            String(raw.type || '').toLowerCase() === 'bot_started' || 
+            String(raw.body?.type || '').toLowerCase() === 'bot_started' || 
+            String(raw.payload?.type || '').toLowerCase() === 'bot_started' ||
+            String(raw.action || '').toLowerCase() === 'bot_started' ||
+            String(raw.payload?.action || '').toLowerCase() === 'bot_started' ||
+            ['/start', 'начать', 'старт', 'start', 'onboarding_start'].includes(trimmedLowerText) ||
+            trimmedLowerText.startsWith('/start ') ||
+            trimmedLowerText.startsWith('начать ') ||
+            trimmedLowerText.startsWith('старт ');
+
+          if (isStartTrigger) {
+            const { getWelcomeMessage } = await import("../services/funnel");
+            const welcome = getWelcomeMessage(isVoiceInput);
+            if (isVoiceInput) {
+              await this.synthesizeAndSendVoice(cleanId, welcome.voiceText);
+            }
+            await this.safeSendMessageToChat(cleanId, welcome.text, welcome.extra);
+            return res.status(200).send('ok');
+          }
+
+          // 2. Check if callbackData or button callback payload is present
+          const payloadToDispatch = (callbackData || text || '').trim();
+          if (isCallbackUpdate || Boolean(callbackData) || payloadToDispatch.startsWith("score_") || payloadToDispatch === "consult_request" || payloadToDispatch === "ask_question") {
+            const { handleFunnelCallback } = await import("../services/funnel");
+            const funRes = await handleFunnelCallback(cleanId, payloadToDispatch);
+            if (isVoiceInput) {
+              await this.synthesizeAndSendVoice(cleanId, funRes.text);
+            }
+            await this.safeSendMessageToChat(cleanId, funRes.text, funRes.extra);
+            return res.status(200).send('ok');
+          }
+
+          // 3. Process long transcript if needed (> 150 words)
+          const { processLongTranscriptIfNeeded } = await import("../services/longVoice");
+          const longVoiceRes = await processLongTranscriptIfNeeded(cleanId, text);
+          if (longVoiceRes.handled) {
+            if (isVoiceInput) {
+              await this.synthesizeAndSendVoice(cleanId, longVoiceRes.text);
+            }
+            await this.safeSendMessageToChat(cleanId, longVoiceRes.text, longVoiceRes.extra);
+            return res.status(200).send('ok');
+          }
+
+          // 4. Default query handling via tenantKnowledge (order: tenant_knowledge -> legal_updates -> existing cascade)
+          const { answerTenantQuestion } = await import("../services/tenantKnowledge");
+          const context = {
+            chatId: cleanId,
+            tenantId,
+            channel: ChannelType.MAX,
+            isVoice: isVoiceInput,
+            timestamp: Date.now()
+          };
+
+          const tkRes = await answerTenantQuestion(
+            tenantId,
+            text,
+            context,
+            isVoiceInput,
+            async (txt, ctx) => this.core.processMessage(txt, ctx)
+          );
+
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, tkRes.text);
+          }
+          await this.safeSendMessageToChat(cleanId, tkRes.text, tkRes.extra);
+          return res.status(200).send('ok');
+        }
+      }
+      // ==========================================
 
       // 4.5. Проверяем наличие картинок/скриншотов и геолокации во вложениях
       let hasImage = false;
@@ -2723,6 +2836,27 @@ no text, no watermark, no logo, no cartoon, no illustration, no CGI look
 
 CRITICAL: Include ONLY subjects the user mentioned. NEVER add people, animals,
 or objects that are not in the request. Output ONLY the final prompt line.`;
+
+  try {
+    const aiPrompt = await llmService.smartCall(`image_prompt_gen_${trimmed.slice(0, 20)}`, trimmed, systemInstruction);
+    if (aiPrompt && aiPrompt.trim() && aiPrompt !== "Я временно потерял нить. Повтори через минуту.") {
+      let resultText = aiPrompt.trim();
+      
+      // Clean up potential surrounding quotes
+      if (resultText.startsWith('"') && resultText.endsWith('"')) {
+        resultText = resultText.slice(1, -1).trim();
+      }
+      if (resultText.startsWith("'") && resultText.endsWith("'")) {
+        resultText = resultText.slice(1, -1).trim();
+      }
+      
+      if (resultText) {
+        return resultText;
+      }
+    }
+  } catch (llmErr: any) {
+    logger.info(`[ImageGen] LLMService prompt generation failed: ${llmErr?.message || llmErr}. Trying Pollinations as fallback.`);
+  }
 
   try {
     const payload = {
