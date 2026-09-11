@@ -13,6 +13,7 @@ import { AgentOrchestrator, agentOrchestrator } from './core/AgentOrchestrator';
 import { SelinCore } from './core/SelinCore';
 import { MessageContext, ChannelType, TaskType } from './core/types';
 import { MaxAdapter } from './adapters/MaxAdapter';
+import { TelegramAdapter } from './adapters/TelegramAdapter';
 
 // 2. Импорт специализированных агентов
 import { OrderAgent } from './agents/OrderAgent';
@@ -41,6 +42,7 @@ export interface ServerServices {
   orchestrator: AgentOrchestrator;
   selinCore: SelinCore;
   maxAdapter: MaxAdapter;
+  telegramAdapter: TelegramAdapter;
 }
 
 /**
@@ -77,6 +79,10 @@ export function createServerApp(): ServerServices {
   const maxAdapter = new MaxAdapter(selinCore, process.env.MAX_BOT_TOKEN);
   maxAdapter.connect().catch((err) => logger.error('Failed to connect maxAdapter in src/server.ts', { error: err }));
 
+  // Адаптер Telegram
+  const telegramAdapter = new TelegramAdapter(selinOrchestrator);
+  telegramAdapter.registerWebhook().catch((err) => logger.error('Failed to register Telegram webhook', { error: err }));
+
   // ==========================================
   // 3. Express конфигурация
   // ==========================================
@@ -105,28 +111,12 @@ export function createServerApp(): ServerServices {
     return res.status(200).json({ status: 'ok', service: 'Selin AI MAX Adapter' });
   });
 
-  // Место для интеграции с Telegram Webhook
+  // Telegram Webhook
   app.post('/api/telegram/webhook', async (req, res) => {
     try {
-      const update = req.body;
-      const message = update?.message;
-      if (message && message.text) {
-        const chatId = String(message.chat?.id || 'telegram_user');
-        const context: MessageContext = {
-          chatId,
-          tenantId: `tg_${chatId}`,
-          channel: ChannelType.TELEGRAM,
-          isVoice: false,
-          timestamp: Date.now()
-        };
-
-        const aiResponse = await selinOrchestrator.processMessage(message.text, context);
-        // Ответ может быть отправлен через Telegram Bot API (placeholder / расширение)
-        logger.info(`[Telegram] Processed message for ${chatId}: "${aiResponse.text.slice(0, 40)}..."`);
-      }
-      return res.status(200).json({ ok: true });
+      await telegramAdapter.handleWebhook(req, res);
     } catch (err: any) {
-      logger.error('❌ Telegram Webhook error:', err);
+      logger.error('Telegram Webhook error:', err);
       return res.status(200).json({ ok: false });
     }
   });
@@ -316,7 +306,8 @@ export function createServerApp(): ServerServices {
     flightService: selinFlight,
     orchestrator: selinOrchestrator,
     selinCore,
-    maxAdapter
+    maxAdapter,
+    telegramAdapter
   };
 }
 
