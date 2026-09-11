@@ -125,7 +125,7 @@ export function checkJailbreak(tenantId: string, text: string): JailbreakCheckRe
         isJailbreak: true,
         isBlocked: false,
         matchedPattern: item.description,
-        reason: "Я не обсуждаю эту тему.",
+        reason: "Я не обсуждаю эту тему. Запрос заблокирован системой безопасности Selin AI.",
         blockedUntil: 0
       };
     }
@@ -141,7 +141,7 @@ export function checkJailbreak(tenantId: string, text: string): JailbreakCheckRe
         return {
           isJailbreak: true,
           isBlocked: true,
-          reason: "Я не обсуждаю эту тему.",
+          reason: "Я не обсуждаю эту тему. Запрос заблокирован системой безопасности Selin AI.",
           blockedUntil: row.blocked_until
         };
       }
@@ -207,7 +207,7 @@ export function checkJailbreak(tenantId: string, text: string): JailbreakCheckRe
         isJailbreak: true,
         isBlocked: count > 3,
         matchedPattern: item.description,
-        reason: "Я не обсуждаю эту тему.",
+        reason: "Я не обсуждаю эту тему. Запрос заблокирован системой безопасности Selin AI.",
         blockedUntil
       };
     }

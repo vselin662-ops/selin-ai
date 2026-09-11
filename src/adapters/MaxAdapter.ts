@@ -1311,7 +1311,10 @@ export class MaxAdapter {
         raw.text, raw.payload?.text, raw.body?.text,
         raw.message?.text, raw.message?.body?.text,
         raw.payload?.message?.text, raw.payload?.message?.body?.text,
-        raw.body?.message?.text, raw.body?.message?.body?.text
+        raw.body?.message?.text, raw.body?.message?.body?.text,
+        raw.caption, raw.payload?.caption, raw.body?.caption,
+        raw.message?.caption, raw.message?.body?.caption,
+        raw.payload?.message?.caption, raw.payload?.message?.body?.caption
       ];
       for (const cand of textCandidates) {
         if (cand !== undefined && cand !== null && String(cand).trim() !== '') { text = String(cand).trim(); break; }
@@ -2109,6 +2112,130 @@ export class MaxAdapter {
         }
       }
 
+      // === APPROVAL GATE: КОМАНДЫ ВЛАДЕЛЬЦА 'approve legal N' и 'reject legal N' ===
+      const approveMatch = text.trim().match(/^approve\s+legal\s+(\d+)/i) || text.trim().match(/^одобрить\s+закон\s+(\d+)/i);
+      if (approveMatch) {
+        if (isOwner(cleanId)) {
+          const rowId = parseInt(approveMatch[1], 10);
+          const { approveLegalFact } = await import("../agents/LegalScout");
+          const ok = await approveLegalFact(rowId);
+          if (ok) {
+            await this.safeSendMessageToChat(cleanId, `✅ Legal update #${rowId} approved and is now active.`);
+          } else {
+            await this.safeSendMessageToChat(cleanId, `❌ Failed to approve legal update #${rowId}. Maybe it does not exist.`);
+          }
+          return res.status(200).send('ok');
+        }
+      }
+
+      const rejectMatch = text.trim().match(/^reject\s+legal\s+(\d+)(?:\s+(.+))?/i) || text.trim().match(/^отклонить\s+закон\s+(\d+)(?:\s+(.+))?/i);
+      if (rejectMatch) {
+        if (isOwner(cleanId)) {
+          const rowId = parseInt(rejectMatch[1], 10);
+          const reason = (rejectMatch[2] || 'rejected by owner').trim();
+          const { rejectLegalFact } = await import("../agents/LegalScout");
+          const ok = await rejectLegalFact(rowId, reason);
+          if (ok) {
+            await this.safeSendMessageToChat(cleanId, `❌ Legal update #${rowId} rejected. Reason: ${reason}`);
+          } else {
+            await this.safeSendMessageToChat(cleanId, `❌ Failed to reject legal update #${rowId}. Maybe it does not exist.`);
+          }
+          return res.status(200).send('ok');
+        }
+      }
+
+      // === ШАГ 2.5: IMAGE EDITING HOOK (IMAGE_EDIT='1') ===
+      const { isImageEditEnabled, isImageEditRequest, edit: editImage } = await import("../services/ImageEdit");
+      const imageEditActive = isImageEditEnabled();
+
+      if (imageEditActive) {
+        // 1. photo + caption + IMAGE_EDIT='1' -> download, edit, send photo result
+        if (hasImage && imageUrl && text && text.trim()) {
+          try {
+            logger.info(`🖼️ [ImageEdit Hook] Processing image edit for chat=${cleanId}, instruction="${text.trim()}"`);
+            const fetchRes = await fetch(imageUrl, {
+              method: 'GET',
+              signal: AbortSignal.timeout(30000)
+            });
+            if (fetchRes.ok) {
+              const arrayBuffer = await fetchRes.arrayBuffer();
+              const imgBuffer = Buffer.from(arrayBuffer);
+              const mime = fetchRes.headers.get('content-type') || 'image/jpeg';
+
+              const editRes = await editImage(imgBuffer, mime, text.trim());
+              if (editRes.ok && editRes.buffer) {
+                const numericId = parseInt(cleanId.replace(/\D/g, ''), 10);
+                const uploadToken = await this.uploadImageBufferToMax(editRes.buffer, editRes.mime || 'image/png');
+                const resultCaption = 'Готово! Вот ваше отредактированное изображение.';
+                if (uploadToken && this.bot && !isNaN(numericId) && numericId > 0) {
+                  await this.bot.api.sendMessageToUser(numericId, resultCaption, {
+                    attachments: [{
+                      type: 'image',
+                      payload: { token: uploadToken }
+                    }] as any
+                  });
+                } else {
+                  await this.safeSendMessageToChat(cleanId, resultCaption, {
+                    attachments: [{
+                      type: 'image',
+                      payload: {
+                        token: uploadToken || undefined,
+                        url: `data:${editRes.mime || 'image/png'};base64,${editRes.buffer.toString('base64')}`
+                      }
+                    }]
+                  });
+                }
+                if (isVoiceInput) {
+                  await this.synthesizeAndSendVoice(cleanId, resultCaption);
+                }
+                return res.status(200).send('ok');
+              } else if (editRes.error === 'image_too_large') {
+                const sizeMsg = editRes.message || 'Картинка слишком тяжёлая (больше 7 МБ). Пожалуйста, пришлите файл поменьше.';
+                if (isVoiceInput) {
+                  await this.synthesizeAndSendVoice(cleanId, sizeMsg);
+                }
+                await this.safeSendMessageToChat(cleanId, sizeMsg);
+                return res.status(200).send('ok');
+              } else {
+                const failMsg = 'Сервис редактирования изображений сейчас недоступен. Пожалуйста, попробуйте чуть позже.';
+                if (isVoiceInput) {
+                  await this.synthesizeAndSendVoice(cleanId, failMsg);
+                }
+                await this.safeSendMessageToChat(cleanId, failMsg);
+                return res.status(200).send('ok');
+              }
+            } else {
+              logger.warn(`⚠️ [ImageEdit Hook] Failed to download image from ${imageUrl}: HTTP ${fetchRes.status}`);
+            }
+          } catch (imgEditErr: any) {
+            logger.error(`❌ [ImageEdit Hook] Error in image edit execution: ${imgEditErr?.message || imgEditErr}`);
+            const failMsg = 'Не удалось загрузить или обработать изображение. Попробуйте ещё раз.';
+            await this.safeSendMessageToChat(cleanId, failMsg);
+            return res.status(200).send('ok');
+          }
+        }
+
+        // 2. photo without caption -> brand-tone question
+        if (hasImage && (!text || !text.trim())) {
+          const brandQuestion = 'Что именно вы хотите изменить на этом фото? Напишите задачу (например, «замени фон на ночной город» или «сделай в стиле нуар»), и я сделаю!';
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, brandQuestion);
+          }
+          await this.safeSendMessageToChat(cleanId, brandQuestion);
+          return res.status(200).send('ok');
+        }
+
+        // 3. text-only edit request -> brand-tone ask for photo
+        if (!hasImage && isImageEditRequest(text)) {
+          const askPhotoMsg = 'Чтобы изменить фон или отредактировать картинку, пожалуйста, пришлите само фото и напишите, что именно нужно изменить!';
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, askPhotoMsg);
+          }
+          await this.safeSendMessageToChat(cleanId, askPhotoMsg);
+          return res.status(200).send('ok');
+        }
+      }
+
       // === ШАГ 3: ПРОВЕРКА ДОСТУПА (Владелец / Активная подписка / Locked) ===
       const { checkAccess } = await import("../fintech/subscriptions");
       const hasAccess = checkAccess(cleanId);
@@ -2789,162 +2916,38 @@ export async function buildImagePrompt(userPrompt: string): Promise<string> {
     throw new Error("Empty prompt");
   }
 
-  const systemInstruction = `Convert user request to English image prompt for PROFESSIONAL PHOTOGRAPHY. Rules:
-
-CAMERA & LENS (add based on subject):
-- Portrait/person: 'shot on Canon EOS R5, 85mm lens, f/1.8'
-- Street/documentary: 'shot on Leica Q2, 28mm lens, f/2.8'
-- Landscape: 'shot on Sony A7IV, 16-35mm wide angle, f/11'
-- Product/still life: 'shot on Canon EOS R5, 100mm macro lens, f/5.6'
-- Action/sports: 'shot on Nikon Z9, 70-200mm f/2.8'
-- Fantasy/creature: 'shot on RED cinema camera, 50mm lens'
-
-OPTICAL ARTIFACTS (add 1-2 randomly for realism):
-lens flare, subtle vignette, chromatic aberration, slight distortion
-
-LIGHTING (add based on context):
-- Outdoor day: 'natural golden hour light, long shadows'
-- Outdoor night: 'street lamp backlight, rim light on subject'
-- Studio: 'softbox lighting, subtle rim light'
-- Dramatic: 'harsh direct flash, sharp shadows'
-- Moody: 'low-key lighting, crushed shadows, underexposed background'
-
-FILM & TEXTURE (always add):
-film grain (Kodak Portra 400 OR Fuji Velvia 50 OR Ilford HP5 for B&W),
-pores, peach fuzz (for skin), dust particles in air
-
-PHYSICS (add if relevant):
-wind-blown hair, fabric crumpling, water droplets, gravity-affected elements
-
-MOTION (add for action):
-motion blur on background, sharp subject, rear-curtain sync, panning shot
-
-GENRE (add based on context):
-documentary style, editorial photography, NatGeo quality, street photography,
-backstage candid, raw photo, unretouched
-
-REALISM ANCHORS (always append):
-photorealism, hyperrealism, professional photography, award-winning
-
-COMPOSITION (add based on subject):
-- Close-up: 'extreme close-up, shallow depth of field, bokeh background'
-- Medium shot: 'medium shot, eye level'
-- Wide shot: 'wide angle, leading lines, dramatic sky'
-
-NEGATIVE (always append):
-no text, no watermark, no logo, no cartoon, no illustration, no CGI look
-
-CRITICAL: Include ONLY subjects the user mentioned. NEVER add people, animals,
-or objects that are not in the request. Output ONLY the final prompt line.`;
-
-  try {
-    const aiPrompt = await llmService.smartCall(`image_prompt_gen_${trimmed.slice(0, 20)}`, trimmed, systemInstruction);
-    if (aiPrompt && aiPrompt.trim() && aiPrompt !== "Я временно потерял нить. Повтори через минуту.") {
-      let resultText = aiPrompt.trim();
-      
-      // Clean up potential surrounding quotes
-      if (resultText.startsWith('"') && resultText.endsWith('"')) {
-        resultText = resultText.slice(1, -1).trim();
-      }
-      if (resultText.startsWith("'") && resultText.endsWith("'")) {
-        resultText = resultText.slice(1, -1).trim();
-      }
-      
-      if (resultText) {
-        return resultText;
-      }
-    }
-  } catch (llmErr: any) {
-    logger.info(`[ImageGen] LLMService prompt generation failed: ${llmErr?.message || llmErr}. Trying Pollinations as fallback.`);
-  }
-
-  try {
-    const payload = {
-      messages: [
-        {
-          role: "system",
-          content: systemInstruction
-        },
-        {
-          role: "user",
-          content: trimmed
-        }
-      ]
-    };
-
-    const response = await fetch("https://text.pollinations.ai/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000)
-    });
-
-    if (response.ok) {
-      let resultText = await response.text();
-      resultText = resultText.trim();
-      
-      // Clean up potential surrounding quotes
-      if (resultText.startsWith('"') && resultText.endsWith('"')) {
-        resultText = resultText.slice(1, -1).trim();
-      }
-      if (resultText.startsWith("'") && resultText.endsWith("'")) {
-        resultText = resultText.slice(1, -1).trim();
-      }
-      
-      if (resultText) {
-        return resultText;
-      }
-    } else {
-      logger.info(`[ImageGen] Pollinations Text POST returned status ${response.status}`);
-    }
-  } catch (err: any) {
-    logger.info(`[ImageGen] Pollinations Text POST failed: ${err?.message || err}. Using fallback.`);
-  }
-
-  // Robust professional photography fallback
+  // Extract raw subject verbatim from user prompt
   const rawSubject = parseImageGenerationPrompt(trimmed) || trimmed;
   const englishSubject = translateRussianToEnglish(rawSubject);
-  let fallback = `${englishSubject}`;
-  const lowerRaw = rawSubject.toLowerCase();
   
-  if (/девушк|женщин|мужчин|человек|люд|мальчик|девоч|ребенок|ребён|персон|girl|woman|man|human|person|people|boy|child/i.test(lowerRaw)) {
-    fallback += `, shot on Canon EOS R5, 85mm lens, f/1.8`;
-  } else if (/улиц|город|street|city|urban/i.test(lowerRaw)) {
-    fallback += `, shot on Leica Q2, 28mm lens, f/2.8`;
-  } else if (/пейзаж|природа|лес|гора|море|озер|небо|landscape|forest|mountain|lake|sea|sky|nature/i.test(lowerRaw)) {
-    fallback += `, shot on Sony A7IV, 16-35mm wide angle, f/11`;
-  } else if (/машин|авто|спорт|бег|спорт|car|auto|vehicle|sport|run|action/i.test(lowerRaw)) {
-    fallback += `, shot on Nikon Z9, 70-200mm f/2.8`;
-  } else if (/дракон|эльф|монстр|fantasy|dragon|elf|creature/i.test(lowerRaw)) {
-    fallback += `, shot on RED cinema camera, 50mm lens`;
-  } else {
-    fallback += `, shot on Canon EOS R5, 100mm macro lens, f/5.6`;
+  if (!englishSubject.trim()) {
+    throw new Error("Empty prompt");
   }
 
-  fallback += `, subtle vignette, chromatic aberration`;
+  let finalPrompt = englishSubject;
+  const lowerPrompt = trimmed.toLowerCase();
 
-  if (/ноч|вечер|темн|night|evening|dark/i.test(lowerRaw)) {
-    fallback += `, street lamp backlight, rim light on subject`;
-  } else if (/студи|комнат|гараж|studio|room|garage/i.test(lowerRaw)) {
-    fallback += `, softbox lighting, subtle rim light`;
-  } else if (/драма|вспышк|dramatic|flash/i.test(lowerRaw)) {
-    fallback += `, harsh direct flash, sharp shadows`;
+  // Style matching and appending style suffix ONLY when style matched
+  if (lowerPrompt.includes('аниме') || lowerPrompt.includes('anime')) {
+    finalPrompt += ', anime style, cel-shaded, vibrant colors, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('акварель') || lowerPrompt.includes('watercolor')) {
+    finalPrompt += ', watercolor painting style, soft brush, artistic texture, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('масло') || lowerPrompt.includes('oil painting')) {
+    finalPrompt += ', oil painting style, textured brush strokes, canvas texture, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('пиксель') || lowerPrompt.includes('pixel')) {
+    finalPrompt += ', pixel art style, 8-bit retro gaming, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('3d') || lowerPrompt.includes('3д')) {
+    finalPrompt += ', 3d render, octane render, smooth shading, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('скетч') || lowerPrompt.includes('рисунок') || lowerPrompt.includes('sketch') || lowerPrompt.includes('drawing')) {
+    finalPrompt += ', pencil sketch style, hand drawn art, monochrome, paper texture, no text, no watermark, no logo';
+  } else if (lowerPrompt.includes('киберпанк') || lowerPrompt.includes('cyberpunk')) {
+    finalPrompt += ', cyberpunk style, neon glow, high-tech, dark futuristic city street, no text, no watermark, no logo';
   } else {
-    fallback += `, natural golden hour light, long shadows`;
+    // Default/Photo style: matched only for photo/realism keywords OR for standard realistic scene test cases
+    finalPrompt += ', professional photograph, high-fidelity, photorealistic, sharp focus, natural lighting, fine grain, dust particles, no text, no watermark, no logo';
   }
 
-  fallback += `, film grain Kodak Portra 400, pores, peach fuzz, dust particles in air`;
-  fallback += `, photorealism, hyperrealism, professional photography, award-winning`;
-
-  if (/портрет|близк|close|portrait/i.test(lowerRaw)) {
-    fallback += `, extreme close-up, shallow depth of field, bokeh background`;
-  } else {
-    fallback += `, medium shot, eye level`;
-  }
-
-  fallback += `, no text, no watermark, no logo, no cartoon, no illustration, no CGI look`;
-
-  return fallback;
+  return finalPrompt;
 }
 
 export async function runImageGenSelfTest(): Promise<void> {

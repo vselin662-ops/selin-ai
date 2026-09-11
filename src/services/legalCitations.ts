@@ -8,6 +8,7 @@ export interface LegalUpdate {
   fact: string;
   source_url: string;
   source_date: string;
+  status?: string;
 }
 
 export async function checkLegalUpdates(tenantId: string, text: string): Promise<{ matched: boolean; text?: string; routeToHuman?: boolean }> {
@@ -16,7 +17,8 @@ export async function checkLegalUpdates(tenantId: string, text: string): Promise
       return { matched: false };
     }
 
-    const rows = sqliteDb.prepare("SELECT * FROM legal_updates WHERE tenant_id = ?").all(tenantId) as LegalUpdate[];
+    const allRows = sqliteDb.prepare("SELECT * FROM legal_updates WHERE tenant_id = ? AND (status = 'active' OR status IS NULL)").all(tenantId) as LegalUpdate[];
+    const rows = allRows.filter((r: any) => r.status === 'active' || r.status === undefined || r.status === null);
     if (rows.length === 0) {
       return { matched: false };
     }

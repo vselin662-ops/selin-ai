@@ -4,9 +4,10 @@ import { getVoiceConfig, setVoiceGender } from "../../db";
 import { normalizeForVoice } from "../utils/textUtils";
 import { detectVoiceWakeWord } from "../utils/wakeWord";
 import { transcribeAudioBuffer } from "../services/voiceProcessingService";
-import { VoiceMode } from "../core/types";
+import { VoiceMode, ChannelType } from "../core/types";
 import { logger } from "../logger";
 import { synthesizeForChat } from "../services/TTSService";
+import { getSelinCore } from "../core/SelinCore";
 
 const voiceRouter = Router();
 
@@ -73,23 +74,24 @@ voiceRouter.post("/voice-mode", (req, res) => {
 // 2. TTS Endpoint (Data URL)
 voiceRouter.post("/tts", async (req, res) => {
   const { text, chatId } = req.body;
+  const effectiveChatId = chatId || "preview";
   if (!text) return res.status(400).json({ error: "Text is required." });
 
   const wakeResult = detectVoiceWakeWord(text);
   let textToSynthesize = text;
 
   if (wakeResult.detected) {
-    setVoiceGender(chatId, wakeResult.mode!);
+    setVoiceGender(effectiveChatId, wakeResult.mode!);
     textToSynthesize = wakeResult.confirmationSpeech;
   }
 
   try {
-    const audioBuffer = await synthesizeForChat(chatId, textToSynthesize);
+    const audioBuffer = await synthesizeForChat(effectiveChatId, textToSynthesize);
     if (!audioBuffer) {
       throw new Error("TTS engine returned null audio buffer");
     }
     const dataUrl = `data:audio/mpeg;base64,${audioBuffer.toString("base64")}`;
-    const voiceConfig = getVoiceConfig(chatId);
+    const voiceConfig = getVoiceConfig(effectiveChatId);
     return res.json({
       audioUrl: dataUrl,
       voice: voiceConfig.gender === 'female' ? 'Kore' : 'Charon',
@@ -196,9 +198,22 @@ voiceRouter.get("/get-voice-quest", (req, res) => {
   return res.json(cached.data);
 });
 
+// In-memory sessions store for voice organism live dialogue
+const voiceSessions = new Map<string, { userName?: string; step?: string; lastReply?: string }>();
+
 // 7. Voice Organism Live Dialogue
 voiceRouter.post("/voice-organism-dialogue", async (req, res) => {
   let { step, userName, userInput, chatId } = req.body;
+  const sessionKey = chatId || "preview";
+
+  if (!voiceSessions.has(sessionKey)) {
+    voiceSessions.set(sessionKey, {});
+  }
+  const session = voiceSessions.get(sessionKey)!;
+
+  // Sync session state
+  if (userName) session.userName = userName;
+  if (step) session.step = step;
 
   if (userInput && typeof userInput === "string") {
     const wakeResult = detectVoiceWakeWord(userInput);
@@ -206,9 +221,9 @@ voiceRouter.post("/voice-organism-dialogue", async (req, res) => {
       setVoiceGender(chatId || "preview", wakeResult.mode!);
       return res.json({
         speech: wakeResult.confirmationSpeech,
-        userName: sanitizeVoiceName(userName),
+        userName: sanitizeVoiceName(userName || session.userName),
         extractedGoal: null,
-        nextStep: step || "EXPLAIN_PLATFORM",
+        nextStep: step || session.step || "EXPLAIN_PLATFORM",
         voice: wakeResult.voice,
         wakeDetected: true,
         mode: wakeResult.mode
@@ -217,23 +232,55 @@ voiceRouter.post("/voice-organism-dialogue", async (req, res) => {
   }
 
   const voiceConfig = getVoiceConfig(chatId);
-  let extractedName = sanitizeVoiceName(userName);
-  let speech = "Приветствую вас! Я ваш интеллектуальный помощник Selin AI. Чем могу помочь вам сегодня?";
-  let nextStep = step || "EXPLAIN_PLATFORM";
+  let replySpeech = "Приветствую вас! Я ваш интеллектуальный помощник Selin AI. Чем могу помочь вам сегодня?";
+  let nextStep = step || session.step || "EXPLAIN_PLATFORM";
 
-  if (!userInput && !userName) {
-    speech = "Приветствую вас! Я ваш новый интеллектуальный помощник и инженер ваших задач. Как я могу к вам обращаться?";
-    nextStep = "ASK_NAME";
-  } else if (step === "ASK_NAME" || (!userName && userInput)) {
-    const parsed = String(userInput).replace(/меня зовут|я |меня |привет|здравствуй/gi, "").trim();
-    extractedName = sanitizeVoiceName(parsed) || "Друг";
-    speech = `Приятно познакомиться, ${extractedName}! Я готов помочь вам с решением задач, автоматизацией и вопросами. Что вас интересует?`;
-    nextStep = "EXPLAIN_PLATFORM";
+  if (userInput && typeof userInput === "string") {
+    const inputClean = userInput.trim().toLowerCase();
+
+    if (inputClean.includes("как меня зовут") || inputClean.includes("как мое имя") || inputClean.includes("знаешь как меня зовут")) {
+      const knownName = session.userName || "Друг";
+      replySpeech = `Вас зовут ${knownName}! Я прекрасно это помню.`;
+    } else if (inputClean.includes("повтори предыдущий ответ") || inputClean.includes("повтори ответ") || inputClean.includes("что ты сказал до этого")) {
+      const previous = session.lastReply || "Я пока ничего не говорил.";
+      replySpeech = `Повторяю мой предыдущий ответ: ${previous}`;
+    } else if (inputClean.includes("меня зовут") || inputClean.includes("я ")) {
+      const parsed = String(userInput).replace(/меня зовут|я |меня |привет|здравствуй/gi, "").trim();
+      const extractedName = sanitizeVoiceName(parsed) || "Друг";
+      session.userName = extractedName;
+      replySpeech = `Приятно познакомиться, ${extractedName}! Я готов помочь вам с решением задач, автоматизацией и вопросами. Что вас интересует?`;
+      nextStep = "EXPLAIN_PLATFORM";
+    } else {
+      try {
+        const core = getSelinCore();
+        const response = await core.processMessage(userInput, {
+          chatId: chatId || "preview",
+          tenantId: "default",
+          channel: ChannelType.WEB,
+          isVoice: true,
+          voiceMode: VoiceMode.VOICE_TO_VOICE
+        });
+        replySpeech = response.text || `Принято! Вы сказали: "${userInput}". Я готов помочь с автоматизацией бизнеса, изучением языков или рутиной.`;
+      } catch (err: any) {
+        logger.error("Error calling SelinCore in voice-organism-dialogue:", err);
+        replySpeech = `Принято! Вы сказали: "${userInput}". Я готов помочь с автоматизацией бизнеса, изучением языков или рутиной.`;
+      }
+    }
+  } else {
+    if (!session.userName && !userName) {
+      replySpeech = "Приветствую вас! Я ваш новый интеллектуальный помощник и инженер ваших задач. Как я могу к вам обращаться?";
+      nextStep = "ASK_NAME";
+    }
   }
 
+  if (userInput && !userInput.toLowerCase().includes("повтори")) {
+    session.lastReply = replySpeech;
+  }
+  session.step = nextStep;
+
   return res.json({
-    speech,
-    userName: extractedName,
+    speech: replySpeech,
+    userName: session.userName,
     extractedGoal: userInput || null,
     nextStep,
     voice: voiceConfig.gender === 'female' ? 'Kore' : 'Charon',

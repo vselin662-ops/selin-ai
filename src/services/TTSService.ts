@@ -225,7 +225,13 @@ export class TTSService {
    * Основной метод синтеза речи. Возвращает готовый бинарный Buffer или null при ошибке.
    */
   public async synthesize(text: string, options: TTSSynthesisOptions = {}, isSelfTest: boolean = false): Promise<Buffer | null> {
-    const sanitizedText = sanitizeForTTS(text, options.skipStress);
+    let sanitizedText = text;
+    try {
+      sanitizedText = sanitizeForTTS(text, options.skipStress);
+    } catch (err: any) {
+      logger.error(`❌ [StressResolver] failed to resolve stress, using raw text: ${err?.message || err}`);
+      sanitizedText = text;
+    }
     const cleanText = sanitizedText.trim();
     let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
 
@@ -265,7 +271,7 @@ export class TTSService {
         ttsRequestsTotal.inc({ engine: 'edge-library' });
       }
     } catch (err: any) {
-      logger.info(`[TTSService] Library MsEdgeTTS failed: ${err?.message || err}. Trying direct fetch...`);
+      logger.error(`❌ [TTSService] Edge TTS library synthesis failed. Reason: ${err?.message || err}`);
     }
 
     // Попытка 2: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
@@ -277,7 +283,7 @@ export class TTSService {
           ttsRequestsTotal.inc({ engine: 'edge-direct' });
         }
       } catch (err: any) {
-        logger.info(`[TTSService] Direct fetch Edge TTS failed (falling back): ${err?.message || err}`);
+        logger.error(`❌ [TTSService] Direct fetch Edge TTS synthesis failed. Reason: ${err?.message || err}`);
       }
     }
 
@@ -399,7 +405,7 @@ export class TTSService {
     try {
       const { GoogleGenAI } = await import('@google/genai');
       const ai = new GoogleGenAI({ apiKey });
-      const models = ['gemini-2.5-flash-preview-tts', 'gemini-2.0-flash-preview-tts'];
+      const models = ['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts', 'gemini-2.0-flash-preview-tts'];
 
       for (const model of models) {
         try {

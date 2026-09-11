@@ -344,9 +344,67 @@ try {
       fact TEXT,
       source_url TEXT,
       source_date TEXT,
+      status TEXT DEFAULT 'active',
       added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS image_styles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      trigger TEXT,
+      prompt_template TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT
+    );
   `);
+
+  // Safe migration for legal_updates status column
+  try {
+    const columns = sqliteDb.pragma("table_info(legal_updates)");
+    const hasStatus = columns.some((col: any) => col.name === "status");
+    if (!hasStatus) {
+      sqliteDb.exec("ALTER TABLE legal_updates ADD COLUMN status TEXT DEFAULT 'active'");
+    }
+  } catch (e) {
+    logger.warn(`⚠️ [legal_updates] Migration error: ${e}`);
+  }
+
+  // Seed image_styles row
+  try {
+    const styleExists = sqliteDb.prepare("SELECT name FROM image_styles WHERE name = ?").get("Dark Noir Deco");
+    if (!styleExists) {
+      const template = `Repaint this photo in the "Dark Noir Deco" style — the exact look of Bruce Timm's Batman: The Animated Series fused with 1940s Art Deco noir. Flatten everything into bold poster shapes — reduce the face, skin and clothing to only 3–4 flat color zones, big smooth cel-shaded blocks, clean confident outlines. No fine shading, no realistic texture, no 3D rendering, no airbrush gradients. A painterly animation still, not a photo.
+LIGHTING — the key of this style: a hard two-color split — hot crimson-red on one side of the face and body, cold steel-blue / cobalt on the other, almost no midtones. Let large areas collapse into deep solid black, with only red, blue and gold lit planes emerging.
+GLOW & GOLD — critical, push hard: flood the image with radiant light. Paint brilliant glowing golden-amber light — blazing warm gold highlights on skin, hair edges, jewelry, watches and any metal, glowing like molten gold. Add bright glossy luminous rim highlights in electric-blue and hot gold along hair, shoulders, cheekbones and fabric. Fill the dark background with sparkling golden and blue bokeh lights, warm candle-gold glints, glowing lamp flares and hazy neon glimmer. Strong light bloom and lens glow around every bright source. Everything looks lit from within — radiant, luminous, luxurious. Maximum saturation, extreme contrast, never washed out or pastel.
+GEOMETRY: stylize faces and bodies into elegant angular Timm-style planes — large, clean, sculpted facets. Sharp cheekbone and jaw planes, elongated graceful Deco proportions, bold graphic shapes.
+COMPOSITION: dramatic low camera angle looking up at the subject, dynamic diagonal tilt, cinematic and powerful. Large portrait framing so the face reads clearly.
+SUBJECT & GENDER: identify each person's sex and style accordingly. Men — heavy square jaw, broad chin, sharp cheekbones, thick straight brows, wide shoulders; rugged and chiseled, never feminized; strictly keep their exact original hairstyle, length and cut. Women — slim jaw, high cheekbones, arched brows, slender neck; glamorous and sleek. Keep correct gender likeness. Preserve each person's exact face, hairstyle and any headwear, tattoos or accessories from the photo.
+HAIR: deep blue-black, not plain black — rich cobalt-blue reflections and glossy electric-blue and gold highlight strands.
+LIPS: natural soft rosy-nude tone — no bright red or scarlet lipstick, no heavy makeup.
+BACKGROUND: an elegant nocturnal Art Deco setting with strong depth and glowing golden light. Only IF the subject is outdoors or there is a visible window, add a brooding Art Deco Gotham skyline with a glowing Bat-signal in the smoky sky. If the subject is indoors with no window, keep the interior as simple bold Deco shapes lit by warm glowing gold lamps and bokeh — no Bat-signal. Simplify any car or room interior into large flat geometric shapes, not realistic detail.
+Glamorous, dangerous, mysterious noir mood. Rich saturated red-blue-and-gold palette on true black, radiant glowing golden accents. Gallery-quality Art Deco noir poster, razor-sharp linework, dramatic chiaroscuro. Aspect ratio 3:4.`;
+      sqliteDb.prepare("INSERT INTO image_styles (name, trigger, prompt_template) VALUES (?, ?, ?)")
+        .run("Dark Noir Deco", "нуар|noir|deco|бэтмен|батмен", template);
+      logger.info("Inserted 'Dark Noir Deco' style seed row.");
+    }
+  } catch (e) {
+    logger.warn(`⚠️ [image_styles] Seed error: ${e}`);
+  }
+
+  // Seed default system_settings
+  try {
+    const editFlag = sqliteDb.prepare("SELECT value FROM system_settings WHERE key = 'IMAGE_EDIT'").get();
+    if (!editFlag) {
+      sqliteDb.prepare("INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)")
+        .run("IMAGE_EDIT", "0", new Date().toISOString());
+    }
+  } catch (e) {
+    logger.warn(`⚠️ [system_settings] Seed error: ${e}`);
+  }
 
   // Safe migration for voice_prefs columns
   try {

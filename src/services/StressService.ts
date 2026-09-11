@@ -231,7 +231,12 @@ function splitAtConjunction(sent: string): string[] | null {
  */
 export function preprocessTextForTTS(text: string, engine: TTSEngineType = 'edge'): string {
   if (!text) return '';
-  const withIntonation = prepareIntonation(text);
-  const withStress = applyStressDict(withIntonation, engine);
-  return withStress;
+  try {
+    const withIntonation = prepareIntonation(text);
+    const withStress = applyStressDict(withIntonation, engine);
+    return withStress;
+  } catch (err: any) {
+    logger.warn(`⚠️ [StressService] preprocessTextForTTS failed: ${err?.message || err}`);
+    return text;
+  }
 }

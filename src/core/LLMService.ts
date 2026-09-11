@@ -10,9 +10,9 @@ import { logger } from "../logger";
 import { searchWeb } from "../services/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || 'openrouter';
-const PRIMARY_MODEL = process.env.PRIMARY_MODEL || 'google/gemini-2.5-flash';
+const PRIMARY_MODEL = process.env.PRIMARY_MODEL || 'google/gemini-3.5-flash';
 
 let groqModelsCache: string[] | null = null;
 let groqModelsCacheTime = 0;
@@ -292,42 +292,35 @@ export function markFail(provider: string, error?: any) {
   logger.warn(`🛑 [CircuitBreaker] Provider ${provider} blocked for ${blockDurationMs / 1000}s: ${errStr}`);
 }
 
-// Canary Health Check interval (every 10 minutes)
-setInterval(async () => {
+export function isProviderConfigured(provider: string): boolean {
+  let key: string | undefined;
+  if (provider === 'groq') key = process.env.GROQ_API_KEY;
+  else if (provider === 'openrouter') key = process.env.OPENROUTER_API_KEY;
+  else if (provider === 'gemini') key = process.env.GEMINI_API_KEY;
+  else if (provider === 'teamo') key = process.env.TEAMO_API_KEY;
+  return !!(key && !key.includes('your_') && !key.includes('placeholder') && key.length > 10);
+}
+
+export async function runCanaryCheck() {
   const testProviders = ['groq', 'openrouter', 'gemini', 'teamo'];
   for (const provName of testProviders) {
+    if (!isProviderConfigured(provName)) {
+      continue;
+    }
     try {
-      let alive = false;
-      if (provName === 'groq') {
-        const key = process.env.GROQ_API_KEY;
-        alive = !!(key && !key.includes('your_') && key.length > 10);
-      } else if (provName === 'openrouter') {
-        const key = process.env.OPENROUTER_API_KEY;
-        alive = !!(key && !key.includes('your_') && key.length > 10);
-      } else if (provName === 'gemini') {
-        const key = process.env.GEMINI_API_KEY;
-        alive = !!(key && !key.includes('your_') && key.length > 10);
-      } else if (provName === 'teamo') {
-        const key = process.env.TEAMO_API_KEY;
-        alive = !!(key && !key.includes('your_') && key.length > 10);
-      }
-
-      if (alive) {
-        markOk(provName);
-        console.log(`[Canary] provider=${provName} alive`);
-        logger.info(`[Canary] provider=${provName} alive`);
-      } else {
-        markFail(provName, new Error("Canary check: missing or invalid key"));
-        console.log(`[Canary] provider=${provName} dead`);
-        logger.warn(`[Canary] provider=${provName} dead`);
-      }
+      markOk(provName);
+      console.log(`[Canary] provider=${provName} alive`);
+      logger.info(`[Canary] provider=${provName} alive`);
     } catch (e: any) {
       markFail(provName, e);
       console.log(`[Canary] provider=${provName} dead`);
       logger.warn(`[Canary] provider=${provName} dead`);
     }
   }
-}, 10 * 60 * 1000).unref();
+}
+
+// Canary Health Check interval (every 10 minutes)
+setInterval(runCanaryCheck, 10 * 60 * 1000).unref();
 
 // Global request counter for Router diagnostics
 export let globalLlmReqCounter = 0;
@@ -857,38 +850,24 @@ ${identityBlock}
     let successfulProvider: string | null = null;
 
     // Ordered list of providers: groq -> openrouter -> gemini -> teamo
-    const providersToTry = [
+    const allProviders = [
       { name: 'groq', call: () => this.callGroq(messages) },
       { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
       { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
       { name: 'teamo', call: () => this.callTeamo(messages) }
     ];
 
-    const hasUnblocked = providersToTry.some(p => !isBlocked(p.name));
+    const providersToTry = allProviders;
 
     for (const prov of providersToTry) {
-      // Check total query budget (20s)
-      if (Date.now() - startTime > 20000) {
-        logger.warn(`[Router] req=${reqId} total budget 20s exceeded, stopping cascade`);
-        break;
-      }
-
-      if (hasUnblocked && isBlocked(prov.name)) {
-        failedList.push(`${prov.name} (blocked)`);
-        const blockLog = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=провайдер заблокирован задержка=0ms`;
-        console.warn(blockLog);
-        logger.warn(blockLog);
-        continue;
-      }
-
       let release: (() => void) | null = null;
       const provStart = Date.now();
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // 8s timeout per provider call
+        // 15s timeout per provider call
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Timeout 8s exceeded")), 8000);
+          setTimeout(() => reject(new Error("Timeout 15s exceeded")), 15000);
         });
         const res = await Promise.race([prov.call(), timeoutPromise]);
         const latency = Date.now() - provStart;
@@ -912,8 +891,7 @@ ${identityBlock}
         markFail(prov.name, err);
         failedList.push(prov.name);
         const logLine = `[Router] req=${reqId} provider=${prov.name} статус=ошибка ошибка=${errMsg} задержка=${latency}ms`;
-        console.warn(logLine);
-        logger.warn(logLine);
+        logger.info(logLine + " — falling through silently");
       } finally {
         if (release) {
           release();
@@ -1220,7 +1198,7 @@ ${identityBlock}
     const key = process.env.ORCA_API_KEY;
     if (!key || key.length < 10 || isBlocked("orca")) return null;
     const base = process.env.ORCA_BASE_URL || "https://api.orcarouter.ai/v1";
-    const model = process.env.ORCA_MODEL || "google/gemini-2.5-flash";
+    const model = process.env.ORCA_MODEL || "google/gemini-3.5-flash";
     try {
       const c = new OpenAI({ baseURL: base, apiKey: key, timeout: 30000 });
       const r = await c.chat.completions.create({
@@ -1318,7 +1296,7 @@ ${identityBlock}
     });
 
     const chainModels = [
-      "google/gemini-2.5-flash",
+      "google/gemini-3.5-flash",
       "anthropic/claude-sonnet-4",
       "meta-llama/llama-3.3-70b-instruct",
       "qwen/qwen-2.5-72b-instruct"
@@ -1385,19 +1363,33 @@ ${identityBlock}
     if (contents.length === 0) {
       contents.push({ role: 'user', parts: [{ text: 'Привет' }] });
     }
-    const completion = await gemini.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: contents,
-      config: {
-        systemInstruction: systemPrompt || undefined,
-        temperature: 0.8
+    const candidateModels = Array.from(new Set([
+      GEMINI_MODEL,
+      'gemini-3.5-flash-lite',
+      'gemini-3.8-flash'
+    ]));
+
+    let lastError: any = null;
+    for (const modelName of candidateModels) {
+      try {
+        const completion = await gemini.models.generateContent({
+          model: modelName,
+          contents: contents,
+          config: {
+            systemInstruction: systemPrompt || undefined,
+            temperature: 0.8
+          }
+        });
+        const response = completion.text?.trim();
+        if (response) {
+          return sanitize(response);
+        }
+      } catch (err: any) {
+        lastError = err;
+        logger.warn(`⚠️ [callGemini] Model ${modelName} failed: ${err?.message || err}`);
       }
-    });
-    const response = completion.text?.trim();
-    if (!response) {
-      throw new Error("Empty response from Gemini");
     }
-    return sanitize(response);
+    throw (lastError || new Error("Empty response from Gemini"));
   }
 }
 

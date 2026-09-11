@@ -86,7 +86,9 @@ import { startBibleScheduler } from "./src/services/bibleService";
 import { startMorningScheduler } from "./src/services/morningBriefing";
 import { SecurityGateway } from "./src/core/SecurityGateway";
 
-dotenv.config();
+dotenv.config({ override: true });
+process.env.IMAGE_EDIT = "0";
+process.env.STRESS_FIX = "0";
 checkRequiredEnvVars();
 
 export const app = express();
@@ -396,6 +398,15 @@ async function startServer() {
         await runImageGenSelfTest();
       } catch (err: any) {
         logger.error(`❌ [ImageGen Self-Test] Startup check failed: ${err?.message || err}`);
+      }
+
+      // Start LegalScout Scheduler
+      try {
+        const { startLegalScoutScheduler } = await import("./src/agents/LegalScout");
+        startLegalScoutScheduler();
+        logger.info("✅ [LegalScout] Scheduler started successfully.");
+      } catch (err: any) {
+        logger.error("❌ Failed to start LegalScout Scheduler:", err);
       }
     })();
   });

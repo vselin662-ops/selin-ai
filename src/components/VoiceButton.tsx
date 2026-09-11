@@ -64,11 +64,11 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
     }
     switch (state) {
       case 'recording':
-        return 'Идёт запись... Нажмите, чтобы завершить';
+        return 'Слушаю...';
       case 'processing':
-        return 'Распознаю речь и думаю...';
+        return 'Думаю...';
       case 'speaking':
-        return 'Selin говорит... (нажмите, чтобы остановить)';
+        return 'Говорю...';
       case 'idle':
       default:
         return 'Нажмите на микрофон и скажите запрос';

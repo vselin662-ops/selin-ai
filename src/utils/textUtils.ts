@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { normalizeForVoice as normalizeVoiceUtil, normalizeForSpeech as normalizeSpeechUtil } from "./voiceNormalizer";
+import { normalizeForVoice as normalizeVoiceUtil, normalizeForSpeech as normalizeSpeechUtil, numberToWords } from "./voiceNormalizer";
 import { preprocessTextForTTS, applyStressDict, prepareIntonation, TTSEngineType } from "../services/StressService";
 
 /**
@@ -418,7 +418,6 @@ export function sanitizeForTTS(text: string, skipStress: boolean = false): strin
     const val = parseInt(match, 10);
     if (!isNaN(val)) {
       try {
-        const { numberToWords } = require('./voiceNormalizer');
         return numberToWords(val);
       } catch (e) {
         return match;

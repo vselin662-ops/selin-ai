@@ -34,7 +34,7 @@ class AIOrchestrator {
         name: 'orca',
         baseURL: process.env.ORCA_BASE_URL || 'https://api.orcarouter.ai/v1',
         apiKey: process.env.ORCA_API_KEY || '',
-        model: process.env.ORCA_MODEL || 'google/gemini-2.5-flash',
+        model: process.env.ORCA_MODEL || 'google/gemini-3.5-flash',
         priority: 2,
       },
       {
@@ -62,7 +62,7 @@ class AIOrchestrator {
         name: 'gemini',
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
         apiKey: process.env.GEMINI_API_KEY || '',
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
         priority: 6,
       },
     ];

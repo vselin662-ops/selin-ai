@@ -85,7 +85,7 @@ export class BusinessPlanConnector extends BaseConnector<BusinessPlanParams, Bus
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
     });
 
@@ -206,7 +206,7 @@ export async function diagnoseBusiness(tenantId: string): Promise<string> {
   try {
     const prompt = `Ты строгий и опытный бизнес-ментор. Начни экспресс-диагностику бизнеса пользователя.
 Задай 5 ключевых вопросов списком (Ниша, Стадия, Доход, Команда, Главный блокер), чтобы составить первичный бизнес-профиль.`;
-    const res = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+    const res = await ai.models.generateContent({ model: "gemini-3.5-flash", contents: prompt });
     return `💼 **Экспресс-диагностика бизнеса:**\n\n${res.text}`;
   } catch (err) {
     return `💼 **Бизнес-диагностика:** Напиши подробнее о своей нише, текущем доходе и главной проблеме в бизнесе.`;
@@ -239,7 +239,7 @@ export async function generateDailyTask(tenantId: string): Promise<string> {
 Формат JSON: {"title": "string", "description": "string"}`;
 
     const res = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -287,7 +287,7 @@ export async function checkTask(tenantId: string, report: string): Promise<strin
 Верни ответ СТРОГО в JSON: {"status": "done" | "partial" | "failed", "feedback": "string"}`;
 
     const res = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -363,7 +363,7 @@ export async function salesRoleplay(tenantId: string, scenario: string = "Про
 Поприветствуй продавца (пользователя), задай ему первый вопрос с возражением по цене или качеству, чтобы протестировать его навыки продаж.`;
 
     const res = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
     });
 

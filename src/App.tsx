@@ -32,6 +32,7 @@ import { StaffFeed } from './components/StaffFeed';
 import { ModerationPanel } from './components/ModerationPanel';
 import { KnowledgeBasePanel } from './components/KnowledgeBasePanel';
 import { VoiceButton } from './components/VoiceButton';
+import { Logo } from './components/Logo';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
@@ -122,6 +123,17 @@ export default function App() {
     return localStorage.getItem('selin_voice') || 'Kore';
   });
 
+  const [conversationId] = useState<string>(() => {
+    let id = sessionStorage.getItem('selin_conversation_id');
+    if (!id) {
+      id = 'conv_' + Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem('selin_conversation_id', id);
+    }
+    return id;
+  });
+  const voiceStepRef = useRef<string>('ASK_NAME');
+  const voiceUserNameRef = useRef<string>('');
+
   const [isAdminAuthorized, setIsAdminAuthorized] = useState<boolean>(() => {
     return !!localStorage.getItem('selin_admin_token');
   });
@@ -161,6 +173,7 @@ export default function App() {
   };
 
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const [voiceDialogue, setVoiceDialogue] = useState<VoiceDialogueState>({
     userText: '',
@@ -225,6 +238,7 @@ export default function App() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
+        currentUtteranceRef.current = null;
       } catch (_) {}
     }
   };
@@ -245,7 +259,7 @@ export default function App() {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: chosenVoice }),
+        body: JSON.stringify({ text, voice: chosenVoice, chatId: conversationId }),
       });
 
       if (res.ok) {
@@ -279,6 +293,7 @@ export default function App() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         const utterance = new SpeechSynthesisUtterance(text);
+        currentUtteranceRef.current = utterance;
         utterance.lang = 'ru-RU';
         utterance.rate = 1.0;
         utterance.pitch = 1.0;
@@ -289,16 +304,19 @@ export default function App() {
 
         utterance.onend = () => {
           setVoiceStateCustom('idle');
+          currentUtteranceRef.current = null;
           if (onEnd) onEnd();
         };
         utterance.onerror = () => {
           setVoiceStateCustom('idle');
+          currentUtteranceRef.current = null;
           if (onEnd) onEnd();
         };
 
         window.speechSynthesis.speak(utterance);
       } catch (_) {
         setVoiceStateCustom('idle');
+        currentUtteranceRef.current = null;
         if (onEnd) onEnd();
       }
     } else {
@@ -308,7 +326,12 @@ export default function App() {
   };
 
   const handleVoiceInput = async (text: string) => {
-    if (!text || !text.trim()) return;
+    if (!text || !text.trim()) {
+      setVoiceStateCustom('idle');
+      return;
+    }
+
+    console.log("voice_turn_start", text);
 
     stopAllAudio();
 
@@ -335,7 +358,11 @@ export default function App() {
           isGenerating: false,
           isOpen: true,
         });
-        await speakText(wakeResult.confirmationSpeech, wakeResult.voice!);
+        await speakText(wakeResult.confirmationSpeech, wakeResult.voice!, () => {
+          console.log("voice_tts_ended");
+          console.log("voice_loop_rearm");
+          startRecording().catch(console.error);
+        });
         return;
       }
     }
@@ -350,6 +377,10 @@ export default function App() {
       setVoiceToast(`Вы: "${text}"`);
     }
 
+    // Set UI to 'processing' state
+    setVoiceStateCustom('processing');
+
+    let speakingStarted = false;
     try {
       const res = await fetch('/api/voice-organism-dialogue', {
         method: 'POST',
@@ -357,7 +388,9 @@ export default function App() {
         body: JSON.stringify({
           userInput: text,
           history: [],
-          step: 2,
+          step: voiceStepRef.current,
+          userName: voiceUserNameRef.current,
+          chatId: conversationId,
         }),
       });
 
@@ -368,6 +401,9 @@ export default function App() {
       const data = await res.json();
       const reply = data?.speech || data?.reply || 'Я вас слышу! Чем я могу помочь по вашим задачам или языкам?';
 
+      if (data?.nextStep) voiceStepRef.current = data.nextStep;
+      if (data?.userName) voiceUserNameRef.current = data.userName;
+
       setVoiceDialogue({
         userText: text,
         assistantText: reply,
@@ -376,7 +412,12 @@ export default function App() {
       });
 
       const voiceToUse = data?.voice || effectiveVoice;
-      await speakText(reply, voiceToUse);
+      speakingStarted = true;
+      await speakText(reply, voiceToUse, () => {
+        console.log("voice_tts_ended");
+        console.log("voice_loop_rearm");
+        startRecording().catch(console.error);
+      });
     } catch (err) {
       console.warn('Voice AI dialogue error, fallback to local reply:', err);
       const fallbackReply = `Принято! Вы сказали: "${text}". Я готов помочь с автоматизацией бизнеса, изучением языков или рутиной.`;
@@ -386,7 +427,16 @@ export default function App() {
         isGenerating: false,
         isOpen: true,
       });
-      await speakText(fallbackReply, effectiveVoice);
+      speakingStarted = true;
+      await speakText(fallbackReply, effectiveVoice, () => {
+        console.log("voice_tts_ended");
+        console.log("voice_loop_rearm");
+        startRecording().catch(console.error);
+      });
+    } finally {
+      if (!speakingStarted) {
+        setVoiceStateCustom('idle');
+      }
     }
   };
 
@@ -437,9 +487,7 @@ export default function App() {
       <header className="sticky top-0 z-40 bg-[#161210]/90 backdrop-blur-xl border-b border-[#2A231F]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#2A221E] to-[#1C1715] border border-[#C5A059]/40 flex items-center justify-center text-[#C5A059] shadow-lg">
-              <Bot className="w-5 h-5" />
-            </div>
+            <Logo size={38} />
             <div>
               <h1 className="text-lg font-bold text-[#EAE6DF] tracking-wide leading-none flex items-center gap-2">
                 Selin AI
@@ -732,13 +780,21 @@ export default function App() {
                     <div className="text-[10px] text-[#7A7167] font-medium">Быстрый голосовой запрос:</div>
                     <div className="flex flex-wrap gap-1.5 justify-center">
                       <button
-                        onClick={() => handleVoiceInput('Помоги выучить английский')}
+                        onClick={() => {
+                          console.log("quick_command_click", "Читай Библию");
+                          console.log("quick_command_click(Читай Библию)");
+                          handleVoiceInput('Читай Библию');
+                        }}
                         className="text-[11px] px-2.5 py-1 rounded-lg bg-[#1F1916] text-[#A89E94] hover:text-[#EAE6DF] hover:bg-[#2A221E] border border-[#332822] transition-colors"
                       >
-                        «Учить английский»
+                        «Читай Библию»
                       </button>
                       <button
-                        onClick={() => handleVoiceInput('Проведи аудит моего бизнеса')}
+                        onClick={() => {
+                          console.log("quick_command_click", "Аудит бизнеса");
+                          console.log("quick_command_click(Аудит бизнеса)");
+                          handleVoiceInput('Проведи аудит моего бизнеса');
+                        }}
                         className="text-[11px] px-2.5 py-1 rounded-lg bg-[#1F1916] text-[#A89E94] hover:text-[#EAE6DF] hover:bg-[#2A221E] border border-[#332822] transition-colors"
                       >
                         «Аудит бизнеса»
@@ -753,7 +809,12 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Card 1: Languages */}
               <div
-                onClick={() => setActiveTab('languages')}
+                onClick={() => {
+                  console.log("quick_command_click", "Языковой Наставник");
+                  console.log("quick_command_click(Языковой Наставник)");
+                  setActiveTab('languages');
+                  handleVoiceInput('Помоги выучить английский');
+                }}
                 className="group p-6 rounded-2xl bg-[#161210] border border-[#2A231F] hover:border-[#C5A059]/50 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 shadow-xl hover:shadow-[#C5A059]/5"
               >
                 <div className="space-y-4">
@@ -778,7 +839,12 @@ export default function App() {
 
               {/* Card 2: Business */}
               <div
-                onClick={() => setActiveTab('business')}
+                onClick={() => {
+                  console.log("quick_command_click", "Бизнес-Ментор");
+                  console.log("quick_command_click(Бизнес-Ментор)");
+                  setActiveTab('business');
+                  handleVoiceInput('Проведи аудит моего бизнеса');
+                }}
                 className="group p-6 rounded-2xl bg-[#161210] border border-[#2A231F] hover:border-[#C5A059]/50 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 shadow-xl hover:shadow-[#C5A059]/5"
               >
                 <div className="space-y-4">
@@ -803,7 +869,12 @@ export default function App() {
 
               {/* Card 3: Lifestyle (Coming Soon) */}
               <div
-                onClick={() => setActiveTab('lifestyle')}
+                onClick={() => {
+                  console.log("quick_command_click", "Бот & Сервисы");
+                  console.log("quick_command_click(Бот & Сервисы)");
+                  setActiveTab('lifestyle');
+                  handleVoiceInput('Расскажи про бот и сервисы');
+                }}
                 className="group p-6 rounded-2xl bg-[#161210] border border-[#2A231F] hover:border-[#C5A059]/50 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 shadow-xl opacity-90"
               >
                 <div className="space-y-4">
@@ -813,7 +884,7 @@ export default function App() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-xl font-bold text-[#EAE6DF] group-hover:text-[#C5A059] transition-colors">
-                        🚕 Быт & Сервисы
+                        🚕 Бот & Сервисы
                       </h3>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full">
                         Скоро

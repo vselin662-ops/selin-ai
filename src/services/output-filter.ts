@@ -26,7 +26,7 @@ function callLLMForGrammarCorrectionSync(text: string): string {
     throw new Error("Missing GEMINI_API_KEY for sync LLM correction");
   }
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
   const systemPrompt = "Ты — лингвистический корректор русского языка. Исправь грамматические ошибки в числительных и падежах (особенно конструкции типа 'от одна до два лет' -> 'от одного до двух лет', 'от одна до два' -> 'от одного до двух'). Верни исправленный русский текст. Ничего не комментируй, не добавляй отсебятины.";
   
   const escapedText = JSON.stringify(text);
