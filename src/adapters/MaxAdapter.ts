@@ -2197,7 +2197,7 @@ export class MaxAdapter {
                 await this.safeSendMessageToChat(cleanId, sizeMsg);
                 return res.status(200).send('ok');
               } else {
-                const failMsg = 'Сервис редактирования изображений сейчас недоступен. Пожалуйста, попробуйте чуть позже.';
+                const failMsg = editRes.message || 'В данный момент функция редактирования фото временно недоступна из-за ограничений провайдера, но вы можете прислать обычный текстовый запрос, и я нарисую для вас новую картинку!';
                 if (isVoiceInput) {
                   await this.synthesizeAndSendVoice(cleanId, failMsg);
                 }
@@ -2209,7 +2209,7 @@ export class MaxAdapter {
             }
           } catch (imgEditErr: any) {
             logger.error(`❌ [ImageEdit Hook] Error in image edit execution: ${imgEditErr?.message || imgEditErr}`);
-            const failMsg = 'Не удалось загрузить или обработать изображение. Попробуйте ещё раз.';
+            const failMsg = 'В данный момент функция редактирования фото временно недоступна из-за ограничений провайдера, но вы можете прислать обычный текстовый запрос, и я нарисую для вас новую картинку!';
             await this.safeSendMessageToChat(cleanId, failMsg);
             return res.status(200).send('ok');
           }

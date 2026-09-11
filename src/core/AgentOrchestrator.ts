@@ -2,6 +2,7 @@ import { AIResponse, MessageContext } from "./types";
 import { LLMService, llmService } from "./LLMService";
 import { logger } from "../logger";
 import { CacheService } from "./CacheService";
+import { agentQueueService } from "../services/agentQueueService";
 
 export interface AgentConfig {
   name: string;
@@ -80,15 +81,23 @@ export class AgentOrchestrator {
   }
 
   public getStatus(): { agents: any[]; queueLength: number; tasksCount: number } {
+    const queueData = agentQueueService.getAgentsStatus();
     return {
-      agents: Object.entries(this.agents).map(([key, a]) => ({
+      agents: queueData.agents.map(a => ({
+        id: a.id,
         name: a.name,
+        code: a.code,
         description: a.role,
-        status: "idle",
-        capabilitiesCount: 3
+        status: a.status,
+        queueCount: a.queueCount,
+        maxCapacity: a.maxCapacity,
+        activeTask: a.activeTask,
+        completedToday: a.completedToday,
+        latencyMs: a.latencyMs,
+        capabilitiesCount: a.capabilities.length
       })),
-      queueLength: 0,
-      tasksCount: 0
+      queueLength: queueData.summary.totalQueue,
+      tasksCount: queueData.summary.totalCompletedToday
     };
   }
 

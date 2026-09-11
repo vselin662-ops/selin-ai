@@ -857,7 +857,7 @@ ${identityBlock}
       { name: 'teamo', call: () => this.callTeamo(messages) }
     ];
 
-    const providersToTry = allProviders;
+    const providersToTry = allProviders.filter(prov => isProviderConfigured(prov.name));
 
     for (const prov of providersToTry) {
       let release: (() => void) | null = null;

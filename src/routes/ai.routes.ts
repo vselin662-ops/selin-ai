@@ -3,6 +3,7 @@ import { llmService } from "../core/LLMService";
 import { AgentOrchestrator } from "../core/AgentOrchestrator";
 import { MessageContext, ChannelType } from "../core/types";
 import { logger } from "../logger";
+import { agentQueueService } from "../services/agentQueueService";
 
 const aiRouter = Router();
 const orchestrator = new AgentOrchestrator(llmService);
@@ -155,6 +156,77 @@ aiRouter.post("/ai/switch", (req, res) => {
   const { provider } = req.body;
   if (!provider) return res.status(400).json({ error: "provider is required" });
   return res.json({ success: true, activeProvider: provider });
+});
+
+// 8. AI Agent Status and Queue Management
+aiRouter.get(["/ai/agents/status", "/agents/status"], (req, res) => {
+  try {
+    const data = agentQueueService.getAgentsStatus();
+    return res.json({ success: true, ...data });
+  } catch (err: any) {
+    logger.error("Error getting agents status:", { error: err?.message || err });
+    return res.status(500).json({ error: "Failed to get agents status" });
+  }
+});
+
+aiRouter.post(["/ai/agents/task", "/agents/task"], (req, res) => {
+  const { agentId, title, priority, source } = req.body;
+  if (!agentId || !title) {
+    return res.status(400).json({ error: "agentId and title are required" });
+  }
+
+  const task = agentQueueService.enqueueTask(agentId, title, priority, source);
+  if (!task) {
+    return res.status(404).json({ error: "Agent not found" });
+  }
+
+  const updatedStatus = agentQueueService.getAgentsStatus();
+  return res.json({ success: true, task, ...updatedStatus });
+});
+
+aiRouter.post(["/ai/agents/complete", "/agents/complete"], (req, res) => {
+  const { agentId, taskId } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ error: "agentId is required" });
+  }
+
+  const success = agentQueueService.completeTask(agentId, taskId);
+  if (!success) {
+    return res.status(404).json({ error: "Agent not found" });
+  }
+
+  const updatedStatus = agentQueueService.getAgentsStatus();
+  return res.json({ success: true, ...updatedStatus });
+});
+
+aiRouter.post(["/ai/agents/toggle", "/agents/toggle"], (req, res) => {
+  const { agentId } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ error: "agentId is required" });
+  }
+
+  const updatedAgent = agentQueueService.toggleStatus(agentId);
+  if (!updatedAgent) {
+    return res.status(404).json({ error: "Agent not found" });
+  }
+
+  const updatedStatus = agentQueueService.getAgentsStatus();
+  return res.json({ success: true, agent: updatedAgent, ...updatedStatus });
+});
+
+aiRouter.post(["/ai/agents/clear", "/agents/clear"], (req, res) => {
+  const { agentId } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ error: "agentId is required" });
+  }
+
+  const success = agentQueueService.clearQueue(agentId);
+  if (!success) {
+    return res.status(404).json({ error: "Agent not found" });
+  }
+
+  const updatedStatus = agentQueueService.getAgentsStatus();
+  return res.json({ success: true, ...updatedStatus });
 });
 
 export default aiRouter;
