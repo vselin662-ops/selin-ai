@@ -386,7 +386,7 @@ export const VoiceOrganismOnboarding: React.FC<VoiceOrganismOnboardingProps> = (
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2 animate-fade-in">
             <input
               type="text"
-              value={textInput}
+              value={textInput || ''}
               onChange={(e) => setTextInput(e.target.value)}
               placeholder="Напишите ответ от руки..."
               className="flex-1 bg-white/5 border border-white/15 rounded-2xl px-5 py-3.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"

@@ -513,7 +513,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                   </button>
                   <input
                     type="text"
-                    value={inputValue}
+                    value={inputValue || ''}
                     onChange={e => setInputValue(e.target.value)}
                     placeholder="Напишите ответ на вопрос..."
                     className="flex-1 bg-white/5 border border-white/5 rounded-xl px-5 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-white/10 transition-all font-light"
@@ -641,7 +641,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                         </label>
                         <input
                           type="text"
-                          value={detectedConfig.business_name}
+                          value={detectedConfig.business_name || ''}
                           onChange={e => setDetectedConfig({ ...detectedConfig, business_name: e.target.value })}
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                         />
@@ -652,7 +652,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                         </label>
                         <input
                           type="text"
-                          value={detectedConfig.owner_name}
+                          value={detectedConfig.owner_name || ''}
                           onChange={e => setDetectedConfig({ ...detectedConfig, owner_name: e.target.value })}
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                         />
@@ -665,7 +665,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                       </label>
                       <input
                         type="text"
-                        value={detectedConfig.industry}
+                        value={detectedConfig.industry || ''}
                         onChange={e => setDetectedConfig({ ...detectedConfig, industry: e.target.value })}
                         className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                       />
@@ -677,7 +677,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                           Стиль общения (Тон):
                         </label>
                         <select
-                          value={detectedConfig.tone}
+                          value={detectedConfig.tone || 'friendly'}
                           onChange={e => setDetectedConfig({ ...detectedConfig, tone: e.target.value as any })}
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                         >
@@ -694,7 +694,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                           Уровень автономности:
                         </label>
                         <select
-                          value={detectedConfig.autonomy_level}
+                          value={detectedConfig.autonomy_level || 'full'}
                           onChange={e => setDetectedConfig({ ...detectedConfig, autonomy_level: e.target.value as any })}
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                         >
@@ -813,7 +813,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                           Системный промт (Инструкция поведения):
                         </label>
                         <textarea
-                          value={activeAgent.systemPrompt}
+                          value={activeAgent?.systemPrompt || ''}
                           onChange={e => handleAgentPromptChange(e.target.value)}
                           rows={10}
                           className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-xs text-slate-200 focus:outline-none focus:border-accent focus:bg-black/60 transition-all leading-relaxed"

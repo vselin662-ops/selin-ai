@@ -230,7 +230,7 @@ export const VoiceQuestFlow: React.FC<VoiceQuestFlowProps> = ({ steps: initialSt
                     <span className="text-[11px] text-[#8E847A] block mb-1">Название компании</span>
                     <input 
                       type="text" 
-                      value={businessName} 
+                      value={businessName || ''} 
                       onChange={(e) => setBusinessName(e.target.value)} 
                       placeholder="Например, ProЦветы" 
                       className="w-full bg-[#231E1B] border border-[#DCD6CD]/15 rounded-xl px-3.5 py-2.5 text-sm text-[#EAE6DF] focus:outline-none focus:border-[#C5A059]/60 transition-colors"
@@ -240,7 +240,7 @@ export const VoiceQuestFlow: React.FC<VoiceQuestFlowProps> = ({ steps: initialSt
                     <span className="text-[11px] text-[#8E847A] block mb-1">Сфера деятельности</span>
                     <input 
                       type="text" 
-                      value={industry} 
+                      value={industry || ''} 
                       onChange={(e) => setIndustry(e.target.value)} 
                       placeholder="Например, доставка цветов" 
                       className="w-full bg-[#231E1B] border border-[#DCD6CD]/15 rounded-xl px-3.5 py-2.5 text-sm text-[#EAE6DF] focus:outline-none focus:border-[#C5A059]/60 transition-colors"
@@ -251,7 +251,7 @@ export const VoiceQuestFlow: React.FC<VoiceQuestFlowProps> = ({ steps: initialSt
                   <span className="text-[11px] text-[#8E847A] block mb-1">Имя владельца</span>
                   <input 
                     type="text" 
-                    value={ownerName} 
+                    value={ownerName || ''} 
                     onChange={(e) => setOwnerName(e.target.value)} 
                     placeholder="Ваше имя" 
                     className="w-full bg-[#231E1B] border border-[#DCD6CD]/15 rounded-xl px-3.5 py-2.5 text-sm text-[#EAE6DF] focus:outline-none focus:border-[#C5A059]/60 transition-colors"
@@ -266,7 +266,7 @@ export const VoiceQuestFlow: React.FC<VoiceQuestFlowProps> = ({ steps: initialSt
                   Приветственное сообщение (Ресивер Анна)
                 </label>
                 <textarea 
-                  value={welcomeText} 
+                  value={welcomeText || ''} 
                   onChange={(e) => setWelcomeText(e.target.value)} 
                   rows={3}
                   className="w-full bg-[#231E1B] border border-[#DCD6CD]/15 rounded-xl p-3.5 text-sm text-[#EAE6DF] focus:outline-none focus:border-[#C5A059]/60 transition-colors font-light leading-relaxed"

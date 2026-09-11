@@ -154,7 +154,7 @@ export const MCPToolsPanel: React.FC = () => {
               Входные параметры (JSON Schema / Zod Validated):
             </label>
             <textarea
-              value={argsInput}
+              value={argsInput || ''}
               onChange={(e) => setArgsInput(e.target.value)}
               rows={8}
               className="w-full bg-gray-950/80 border border-gray-800 rounded-xl p-3 font-mono text-xs text-green-400 focus:outline-none focus:border-indigo-500"

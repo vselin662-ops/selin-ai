@@ -768,7 +768,7 @@ export const AgentStatusPanel: React.FC = () => {
                 </label>
                 <select
                   id="modal-agent-select"
-                  value={selectedAgentForTask}
+                  value={selectedAgentForTask || ''}
                   onChange={(e) => setSelectedAgentForTask(e.target.value)}
                   className="w-full p-2.5 rounded-xl bg-[#14100E] border border-[#332822] text-[#EAE6DF] text-xs focus:border-[#C5A059] focus:outline-none"
                 >
@@ -788,7 +788,7 @@ export const AgentStatusPanel: React.FC = () => {
                 <input
                   id="modal-task-title"
                   type="text"
-                  value={taskTitleInput}
+                  value={taskTitleInput || ''}
                   onChange={(e) => setTaskTitleInput(e.target.value)}
                   placeholder="Например: Проверить расчёт чека для клиента #902"
                   className="w-full p-2.5 rounded-xl bg-[#14100E] border border-[#332822] text-[#EAE6DF] placeholder-[#7A7167] text-xs focus:border-[#C5A059] focus:outline-none"

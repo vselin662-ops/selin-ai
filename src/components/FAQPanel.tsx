@@ -356,7 +356,7 @@ export const FAQPanel: React.FC<FAQPanelProps> = ({ onWipeData, systemPrompts })
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Академия & FAQ</span>
             <input
               type="text"
-              value={searchTerm}
+              value={searchTerm || ''}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Поиск по документации и часто задаваемым вопросам..."
               className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"

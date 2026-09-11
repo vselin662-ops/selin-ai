@@ -449,7 +449,7 @@ export function KnowledgeBasePanel() {
                 <input 
                   type="text" 
                   placeholder="Название документа (например: Прайс-лист компании)"
-                  value={manualTitle}
+                  value={manualTitle || ''}
                   onChange={(e) => setManualTitle(e.target.value)}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-colors font-light"
                 />
@@ -458,7 +458,7 @@ export function KnowledgeBasePanel() {
                 <textarea 
                   placeholder="Вставьте сюда любой текст бизнес-справки..."
                   rows={4}
-                  value={manualText}
+                  value={manualText || ''}
                   onChange={(e) => setManualText(e.target.value)}
                   className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-colors resize-none font-sans font-light"
                   required
@@ -504,7 +504,7 @@ export function KnowledgeBasePanel() {
             <input 
               type="text"
               placeholder="Какая стоимость услуг? Работаете ли вы в выходные?"
-              value={searchQuery}
+              value={searchQuery || ''}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/70 transition-colors font-light"
               required

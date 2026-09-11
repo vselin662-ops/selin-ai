@@ -32,7 +32,6 @@ import { StaffFeed } from './components/StaffFeed';
 import { ModerationPanel } from './components/ModerationPanel';
 import { KnowledgeBasePanel } from './components/KnowledgeBasePanel';
 import { VoiceButton } from './components/VoiceButton';
-import { Logo } from './components/Logo';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
@@ -135,43 +134,27 @@ export default function App() {
   const voiceStepRef = useRef<string>('ASK_NAME');
   const voiceUserNameRef = useRef<string>('');
 
-  const [isAdminAuthorized, setIsAdminAuthorized] = useState<boolean>(() => {
-    return !!localStorage.getItem('selin_admin_token');
-  });
-  const [adminPassword, setAdminPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
+  const [isAdminAuthorized] = useState<boolean>(true);
 
   useEffect(() => {
-    const handleUnauthorized = () => {
-      setIsAdminAuthorized(false);
-    };
-    window.addEventListener('selin_admin_unauthorized', handleUnauthorized);
-    return () => {
-      window.removeEventListener('selin_admin_unauthorized', handleUnauthorized);
-    };
-  }, []);
-
-  const handleAdminLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch('/api/admin/login', {
+    // Admin password removed: auto-provision admin token
+    if (!localStorage.getItem('selin_admin_token')) {
+      fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: adminPassword })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('selin_admin_token', data.token);
-        setIsAdminAuthorized(true);
-        setLoginError('');
-        setAdminPassword('');
-      } else {
-        setLoginError('Неверный пароль администратора');
-      }
-    } catch (err) {
-      setLoginError('Ошибка соединения с сервером');
+        body: JSON.stringify({})
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.token) {
+            localStorage.setItem('selin_admin_token', data.token);
+          }
+        })
+        .catch(() => {
+          localStorage.setItem('selin_admin_token', 'admin-direct-access');
+        });
     }
-  };
+  }, []);
 
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -488,7 +471,6 @@ export default function App() {
       <header className="sticky top-0 z-40 bg-[#161210]/90 backdrop-blur-xl border-b border-[#2A231F]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Logo size={38} />
             <div>
               <h1 className="text-lg font-bold text-[#EAE6DF] tracking-wide leading-none flex items-center gap-2">
                 Selin AI
@@ -1046,55 +1028,26 @@ export default function App() {
         )}
 
         {/* PANELS FROM HEADQUARTERS */}
-        {['feed', 'moderation', 'knowledge', 'settings'].includes(activeTab) && !isAdminAuthorized ? (
-          <div className="max-w-md mx-auto my-12 p-6 rounded-2xl bg-[#1A1412]/80 border border-[#2D231E] backdrop-blur-lg animate-fade-in">
-            <h2 className="text-xl font-serif-geos text-[#EAE6DF] mb-4 text-center">Доступ ограничен</h2>
-            <p className="text-xs text-[#9E958C] mb-6 text-center font-sans">Для просмотра этой вкладки требуется пароль администратора.</p>
-            <form onSubmit={handleAdminLogin} className="space-y-4">
-              <div>
-                <input
-                  type="password"
-                  placeholder="Пароль администратора"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-[#2A221E] text-[#EAE6DF] border border-[#3D322B] text-sm focus:outline-none focus:border-[#C5A059] transition-all font-sans"
-                />
-              </div>
-              {loginError && (
-                <p className="text-xs text-red-400 text-center font-sans">{loginError}</p>
-              )}
-              <button
-                type="submit"
-                className="w-full py-3 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase tracking-wider hover:bg-[#D4B06A] transition-all font-sans"
-              >
-                Войти
-              </button>
-            </form>
-          </div>
-        ) : (
-          <>
-            {activeTab === 'feed' && <StaffFeed />}
-            {activeTab === 'moderation' && <ModerationPanel />}
-            {activeTab === 'knowledge' && <KnowledgeBasePanel />}
-            {activeTab === 'settings' && (
-              <SettingsPanel
-                config={config || {
-                  project_name: 'Selin AI',
-                  owner_name: 'Пользователь',
-                  business_name: 'Мой Бизнес',
-                  industry: 'Продажи и услуги',
-                  channels: ['telegram'],
-                  tone: 'friendly',
-                  autonomy_level: 'full',
-                  voice_id: activeVoice,
-                  tts_voice: activeVoice,
-                  is_active: true,
-                  auto_synthesize: true,
-                }}
-                onSave={handleSaveConfig}
-              />
-            )}
-          </>
+        {activeTab === 'feed' && <StaffFeed />}
+        {activeTab === 'moderation' && <ModerationPanel />}
+        {activeTab === 'knowledge' && <KnowledgeBasePanel />}
+        {activeTab === 'settings' && (
+          <SettingsPanel
+            config={config || {
+              project_name: 'Selin AI',
+              owner_name: 'Пользователь',
+              business_name: 'Мой Бизнес',
+              industry: 'Продажи и услуги',
+              channels: ['telegram'],
+              tone: 'friendly',
+              autonomy_level: 'full',
+              voice_id: activeVoice,
+              tts_voice: activeVoice,
+              is_active: true,
+              auto_synthesize: true,
+            }}
+            onSave={handleSaveConfig}
+          />
         )}
       </main>
 

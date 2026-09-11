@@ -13,6 +13,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
   const [localConfig, setLocalConfig] = useState<AppConfig>({ ...config });
   const [saved, setSaved] = useState(false);
 
+  React.useEffect(() => {
+    if (config) {
+      setLocalConfig(prev => ({ ...prev, ...config }));
+    }
+  }, [config]);
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(localConfig);
@@ -61,7 +67,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
               </label>
               <input
                 type="text"
-                value={localConfig.business_name}
+                value={localConfig.business_name || ''}
                 onChange={e => setLocalConfig({ ...localConfig, business_name: e.target.value })}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                 required
@@ -74,7 +80,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
               </label>
               <input
                 type="text"
-                value={localConfig.owner_name}
+                value={localConfig.owner_name || ''}
                 onChange={e => setLocalConfig({ ...localConfig, owner_name: e.target.value })}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
                 required
@@ -88,7 +94,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
             </label>
             <input
               type="text"
-              value={localConfig.industry}
+              value={localConfig.industry || ''}
               onChange={e => setLocalConfig({ ...localConfig, industry: e.target.value })}
               className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light"
               required
@@ -101,7 +107,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
                 Стиль общения (Тон):
               </label>
               <select
-                value={localConfig.tone}
+                value={localConfig.tone || 'friendly'}
                 onChange={e => setLocalConfig({ ...localConfig, tone: e.target.value as any })}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light cursor-pointer"
               >
@@ -118,7 +124,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, onSave }) 
                 Уровень автономности:
               </label>
               <select
-                value={localConfig.autonomy_level}
+                value={localConfig.autonomy_level || 'full'}
                 onChange={e => setLocalConfig({ ...localConfig, autonomy_level: e.target.value as any })}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent focus:bg-black/60 transition-all font-light cursor-pointer"
               >

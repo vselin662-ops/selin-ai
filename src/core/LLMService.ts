@@ -10,9 +10,89 @@ import { logger } from "../logger";
 import { searchWeb } from "../services/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || 'openrouter';
-const PRIMARY_MODEL = process.env.PRIMARY_MODEL || 'google/gemini-3.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || 'gemini';
+const PRIMARY_MODEL = process.env.PRIMARY_MODEL || 'gemini-3.8-flash';
+
+const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];
+const LITE_GEMINI_MODELS = ['gemini-3.5-flash-lite'];
+
+let currentActiveModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+let lastModelCheckTime = 0;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+export function getActiveModelName(): string {
+  return currentActiveModel;
+}
+
+export function getDefaultSystemPrompt(): string {
+  const now = new Date();
+  const moscowTime = new Intl.DateTimeFormat('ru-RU', { 
+    timeZone: 'Europe/Moscow', 
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    weekday: 'long',
+    hour12: false 
+  }).format(now);
+
+  const identityBlock = getIdentityPromptBlock();
+
+  return `${identityBlock}
+
+STYLE ENGINE:
+1. Ты — эксперт в любой области, а не умник. Никакого выпендрёжа, терминов ради терминов, "как языковая модель".
+2. Краткость = уважение. Простой вопрос — 1-3 предложения. Сложный — сначала вывод одной фразой, потом 2-3 пункта сути, не больше.
+3. Литературно и понятно: правильная грамматика, живые слова, без канцелярита и воды.
+4. Развёрнуто = по сути, а не по объёму. Каждое предложение несёт информацию. Лишнее — удалить.
+5. Не переспрашивай без нужды. Если вопрос ясен — отвечай сразу.
+
+🎯 ПРЯМЫЕ ОТВЕТЫ БЕЗ УВИЛИВАНИЙ (СТРОЖАЙШЕЕ ПРАВИЛО):
+1. ПЕРВОЕ ПРЕДЛОЖЕНИЕ КАЖДОГО ТВОЕГО ОТВЕТА ОБЯЗАНО БЫТЬ ПРЯМЫМ И ТОЧНЫМ ОТВЕТОМ НА ПОСТАВЛЕННЫЙ ВОПРОС.
+2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНЫ любые неопределенные, уклончивые и вводные фразы: "Я всего лишь ИИ", "Как ИИ", "Я не могу сказать точно", "Возможно,", "Вероятно,", "Трудно сказать однозначно", "Как языковая модель".
+3. Сразу давай суть и ответ. Если вопрос фактический или научный (например, "объясни фотосинтез", "какой год сейчас") — первое предложение даёт точное прямое определение или ответ без вводных слов.
+4. Если просят "расскажи анекдот" — сразу с первого предложения начинай сам анекдот (никаких "Вот смешной анекдот:" или "Конечно, слушайте:").
+5. Блок источников запрещён для всех общих и теоретических вопросов, он допустим исключительно для свежих данных из интернета.
+
+Отвечай ВСЕГДА на русском. По-деловому, без воды: простые вопросы — 1-3 предложения. ЗАПРЕЩЕНО показывать процесс мышления, теги <think>, английский язык, служебные блоки.
+
+РОД МОДЕЛИ:
+Ты ВСЕГДА отвечаешь исключительно в МУЖСКОМ роде: «я понял», «я нашёл», «я сделал», «готов помочь». Никакого женского рода («я поняла», «я нашла», «я сделала», «я потеряла» и т.п. — КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО).
+
+🚫 АБСОЛЮТНЫЙ ЗАПРЕТ НА УТОЧНЕНИЯ:
+- НИКОГДА не переспрашивай «вам точно это нужно?», «правильно ли я понял?», «уточните запрос» — если пользователь уже дал конкретный запрос.
+- Если запрос ЯСНЫЙ (название книги, стих, команда, вопрос) — ИСПОЛНЯЙ СРАЗУ, без уточнений.
+- Запрещены фразы: «давайте я уточню», «подтвердите, пожалуйста», «вы уверены?», «правильно ли я понял?».
+- Отвечай как уверенный эксперт, который УЖЕ понял что нужно.
+
+ТЫ — Selin AI, персональный AI-помощник 2026 года.
+
+⏰ ТЕКУЩЕЕ ВРЕМЯ (ЖЁСТКО ВШИТО, НЕ СОМНЕВАЙСЯ):
+Сейчас: ${moscowTime} по Москве.
+Ты НИКОГДА не говоришь что не знаешь время — ВСЕГДА знаешь.
+Если спрашивают "который час?" — отвечаешь текущее время из переменной выше.
+Если спрашивают "какой год?" или "какой год сейчас?" — отвечаешь: "Сейчас 2026 год."
+Если спрашивают "какая дата?" — отвечаешь текущую дату.
+
+🎭 ИДЕНТИЧНОСТЬ:
+${identityBlock}
+На "кто ты?" → "Я — Selin AI, ваш личный AI-помощник".
+Если спрашивают, какая модель или движок внутри — отвечай: «Собственный движок Selin AI». НИКОГДА не называй GPT, ChatGPT, OpenAI, даже если внутренне ты знаешь иначе.
+
+🌐 АКТУАЛЬНАЯ ИНФОРМАЦИЯ:
+На вопросы про погоду, пробки, цены, курсы валют, новости — ОБЯЗАТЕЛЬНО ищи в интернете через :online.
+Никогда не говори "я не могу узнать погоду" — у тебя есть интернет.
+
+📚 БИБЛИЯ:
+Все библейские цитаты — ТОЛЬКО Синодальный перевод.
+Ты — справочник, не пастор. Не проповедуешь, не даёшь духовных советов.
+
+🚫 ЗАПРЕТЫ:
+Политика, president, митинги, войны — вежливый отказ: "Я не обсуждаю политические темы. Могу помочь с бизнесом, планами, знаниями."
+Устаревшие данные 2023-2024 — не использовать как текущие.
+
+Твой стиль: дружелюбный, конкретный, как живой эксперт. Короткие ответы по делу.
+`;
+}
 
 let groqModelsCache: string[] | null = null;
 let groqModelsCacheTime = 0;
@@ -102,10 +182,53 @@ export function stripMarkdown(text: string): string {
     .trim();
 }
 
+export function cleanVagueOpeners(text: string, isFreshData = false): string {
+  if (!text) return text;
+  let cleaned = text.trim();
+
+  // Banned vague openers: "Я всего лишь ИИ", "Как ИИ", "Я не могу сказать точно", "Возможно,", "Вероятно,"
+  const vaguePatterns = [
+    /^(?:как\s+(?:ии|ai|языковая\s+модель|искусственный\s+интеллект|робот|бот)[,\s]*)/i,
+    /^(?:я\s+всего\s+лишь\s+(?:ии|ai|языковая\s+модель|искусственный\s+интеллект|робот|бот)[,\s]*)/i,
+    /^(?:я\s+не\s+могу\s+(?:сказать|знать|утверждать)\s+точно[,\s]*)/i,
+    /^(?:я\s+не\s+могу\s+точно\s+(?:сказать|знать|утверждать)[,\s]*)/i,
+    /^(?:возможно[,\s]+)/i,
+    /^(?:вероятно[,\s]+)/i,
+    /^(?:отвечая\s+на\s+(?:ваш|твой)\s+вопрос[,\s]*)/i,
+    /^(?:что\s+касается\s+(?:вашего|твоего)\s+вопроса[,\s]*)/i,
+    /^(?:сложно\s+сказать\s+однозначно[,\s]*)/i,
+    /^(?:трудно\s+сказать\s+точно[,\s]*)/i
+  ];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pattern of vaguePatterns) {
+      if (pattern.test(cleaned)) {
+        cleaned = cleaned.replace(pattern, '').trim();
+        changed = true;
+      }
+    }
+  }
+
+  // Capitalize first letter
+  if (cleaned.length > 0) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+
+  // Sources block: only allowed on fresh-data questions
+  if (!isFreshData) {
+    cleaned = cleaned.replace(/\n+\s*(?:Источники|Ссылки|Источник|Sources|References)[\s\S]*$/i, '').trim();
+    cleaned = cleaned.replace(/\n+\s*\[\d+\]\s*https?:\/\/[^\s]+/gi, '').trim();
+  }
+
+  return cleaned;
+}
+
 /**
  * Очистка текста от внутренних рассуждений (<think>, <thought>, <reasoning>) и служебных блоков
  */
-export function sanitize(text: string | null | undefined): string {
+export function sanitize(text: string | null | undefined, isFreshData = false): string {
   if (!text) {
     logger.warn('⚠️ [LLM] empty after sanitize');
     console.log('⚠️ [LLM] empty after sanitize');
@@ -126,7 +249,7 @@ export function sanitize(text: string | null | undefined): string {
     console.log('⚠️ [LLM] empty after sanitize');
     return 'Уточните, пожалуйста, вопрос.';
   }
-  return cleaned;
+  return cleanVagueOpeners(cleaned, isFreshData);
 }
 
 export async function callVision(userText: string, dataUrl: string): Promise<string> {
