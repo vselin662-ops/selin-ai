@@ -18,6 +18,7 @@ export class TelegramAdapter {
   }
 
   async registerWebhook(): Promise<void> {
+    logger.info(`[Telegram] env check token=${Boolean(process.env.TELEGRAM_BOT_TOKEN)} secret=${Boolean(process.env.TELEGRAM_WEBHOOK_SECRET)} public=${process.env.PUBLIC_URL || 'none'}`);
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
     const publicUrl = process.env.PUBLIC_URL;
@@ -67,12 +68,8 @@ export class TelegramAdapter {
       }
 
       const infoRes = await fetch(`${this.baseUrl}/getWebhookInfo`);
-      const infoData = await infoRes.json();
-      const reportedUrl = infoData.result?.url || webhookUrl;
-      const pendingCount = infoData.result?.pending_update_count ?? 0;
-      const logLine = `[Telegram] webhook_url=${reportedUrl} pending_count=${pendingCount}`;
-      logger.info(logLine);
-      console.log(logLine);
+      const info = await infoRes.json();
+      logger.info(`[Telegram] webhook_url=${info.result?.url || 'none'} pending=${info.result?.pending_update_count ?? -1}`);
 
       this.status = 'working';
     } catch (err: any) {
