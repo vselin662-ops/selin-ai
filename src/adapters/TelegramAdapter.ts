@@ -103,7 +103,6 @@ export class TelegramAdapter {
       };
 
       const aiResponse = await this.orchestrator.processMessage(userText, context);
-      await this.sendMessage(chatId, aiResponse.text);
 
       if (isVoice) {
         try {
@@ -121,6 +120,8 @@ export class TelegramAdapter {
         } catch (ttsErr: any) {
           logger.warn('[Telegram] Voice synthesis failed:', ttsErr?.message || ttsErr);
         }
+      } else {
+        await this.sendMessage(chatId, aiResponse.text);
       }
 
       return res.status(200).json({ ok: true });

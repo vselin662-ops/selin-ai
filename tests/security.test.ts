@@ -189,7 +189,7 @@ describe("Security & Component Tests", () => {
     await adapter.handleWebhook(mockVoiceReq, mockRes);
 
     assert.equal(processMessageCalledWithIsVoice, true);
-    assert.ok(sendMessageCalls.length > 0);
+    assert.equal(sendMessageCalls.length, 0);
     assert.equal(sendVoiceCalls.length, 1);
     assert.deepEqual(sendVoiceCalls[0], Buffer.from("ogg_payload"));
 
