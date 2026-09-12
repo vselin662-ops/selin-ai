@@ -181,6 +181,132 @@ export class SelinCore {
 
     const effectiveText = wakeResult.detected ? wakeResult.cleanedText : userMessage;
 
+    // --- INTERCEPT GREETINGS AND DUPLICATES ---
+    try {
+      const history = await cacheService.getHistory(context.chatId);
+      const userMessages = history.filter((m: any) => m.role === 'user');
+      const assistantResponses = history.filter((m: any) => m.role === 'assistant').map((m: any) => m.content.trim());
+      
+      const currentClean = effectiveText.trim().toLowerCase();
+      const lastUserMsg = userMessages[userMessages.length - 1];
+      const lastUserClean = lastUserMsg ? lastUserMsg.content.trim().toLowerCase() : "";
+
+      const isGreetingMsg = isGreeting(effectiveText);
+
+      // Rule 4: Check if the user is sending the same message consecutively
+      if (currentClean !== "" && currentClean === lastUserClean) {
+        let repeatCount = 1;
+        for (let i = userMessages.length - 1; i >= 0; i--) {
+          if (userMessages[i].content.trim().toLowerCase() === currentClean) {
+            repeatCount++;
+          } else {
+            break;
+          }
+        }
+
+        let reply = "";
+        if (isGreetingMsg) {
+          if (repeatCount === 2) {
+            const candidatesC = [
+              "И тебе. Продолжим вчерашнее или новое?",
+              "Снова привет! Продолжим начатое или обсудим другое?",
+              "Привет еще раз. Какую задачу решаем дальше?",
+              "Привет-привет! Что-то забыли обсудить?",
+              "Рад слышать. Снова в деле или просто здороваешься?"
+            ];
+            reply = selectResponse(candidatesC, assistantResponses);
+          } else {
+            const candidatesD = [
+              "Третье «привет» за минуту. Что-то случилось или проверяешь меня?",
+              "Уже третий раз здороваемся. Всё в порядке или тестируешь?",
+              "Опять привет! Кажется, ты хочешь привлечь моё внимание.",
+              "Мы уже здоровались несколько раз. Что именно случилось?"
+            ];
+            reply = selectResponse(candidatesD, assistantResponses);
+          }
+        } else {
+          if (repeatCount === 2) {
+            const candidatesRep2 = [
+              "Ты только что это прислал. Повторить ответ еще раз?",
+              "Я уже ответил на это сообщение. Давай обсудим другое.",
+              "Вижу повтор. У тебя появились новые вопросы по теме?",
+              "Это сообщение дублирует предыдущее. Что именно мы уточняем?"
+            ];
+            reply = selectResponse(candidatesRep2, assistantResponses);
+          } else {
+            const candidatesRep3 = [
+              "Ты присылаешь это в третий раз. Всё в порядке?",
+              "Опять тот же вопрос. Кажется, мы застряли на одном месте.",
+              "Ты повторяешься. Нужна помощь с чем-то другим?",
+              "Кажется, ты нажимаешь отправку слишком часто. Всё хорошо?"
+            ];
+            reply = selectResponse(candidatesRep3, assistantResponses);
+          }
+        }
+
+        if (reply) {
+          cacheService.pushMessage(context.chatId, { role: 'user', content: effectiveText, timestamp: Date.now() }).catch(() => {});
+          cacheService.pushMessage(context.chatId, { role: 'assistant', content: reply, timestamp: Date.now() }).catch(() => {});
+          const isVoiceResponse = context.isVoice ||
+            context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+            context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+          return {
+            text: reply,
+            confidence: 1.0,
+            voice: isVoiceResponse ? { format: 'ogg' } : undefined
+          };
+        }
+      }
+
+      // Rule 1: Handling "привет / здравствуй / добрый день" (for non-repeating greetings)
+      if (isGreetingMsg) {
+        const alreadyNamed = history.some((msg: any) => 
+          msg.role === 'assistant' && 
+          (msg.content.includes("Селин") || msg.content.toLowerCase().includes("selin"))
+        );
+
+        let reply = "";
+        if (!alreadyNamed) {
+          const candidatesA = [
+            "Привет! Я Селин. Чем могу помочь тебе сегодня?",
+            "Привет! На связи Селин. Какую задачу решим?",
+            "Привет! Я Селин. Как твои дела сегодня?",
+            "Привет! С тобой Селин. Что сегодня на повестке?",
+            "Привет! Я Селин. Готов помочь с любой задачей."
+          ];
+          reply = selectResponse(candidatesA, assistantResponses);
+        } else {
+          const candidatesB = [
+            "Привет! Как твои дела сегодня?",
+            "И тебе привет. Какую задачу разберём сегодня?",
+            "Привет! Снова на связи. С чего начнём?",
+            "Рад слышать тебя снова. Каковы планы на сегодня?",
+            "Привет! Рад тебя видеть. Какую тему обсудим?",
+            "Привет! Как день проходит? Чем могу помочь?",
+            "Привет! Всё отлично. Что интересного произошло?"
+          ];
+          reply = selectResponse(candidatesB, assistantResponses);
+        }
+
+        if (reply) {
+          cacheService.pushMessage(context.chatId, { role: 'user', content: effectiveText, timestamp: Date.now() }).catch(() => {});
+          cacheService.pushMessage(context.chatId, { role: 'assistant', content: reply, timestamp: Date.now() }).catch(() => {});
+          const isVoiceResponse = context.isVoice ||
+            context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+            context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+          return {
+            text: reply,
+            confidence: 1.0,
+            voice: isVoiceResponse ? { format: 'ogg' } : undefined
+          };
+        }
+      }
+    } catch (e) {
+      logger.error('Error handling greeting/duplicate logic:', e);
+    }
+
     // 0. Проверка на запрос к Рою Специалистов
     try {
       const swarmResponse = await tryExecuteSwarm(effectiveText, context);
@@ -551,4 +677,43 @@ ${genderPrompt}
       tasksCount: this.tasks.size
     };
   }
+}
+
+const GREETING_WORDS = ["привет", "здравствуй", "здравствуйте", "добрый день", "доброе утро", "добрый вечер", "hi", "hello"];
+
+function isGreeting(text: string): boolean {
+  if (!text) return false;
+  const norm = text.toLowerCase().trim().replace(/[?!.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+  if (GREETING_WORDS.includes(norm)) {
+    return true;
+  }
+  const words = norm.split(/\s+/);
+  if (words.length <= 2) {
+    return words.some(w => GREETING_WORDS.includes(w));
+  }
+  return false;
+}
+
+function isSimilar(cand: string, past: string[]): boolean {
+  const normCand = cand.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+  return past.some(p => {
+    const normP = p.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+    if (normCand === normP) return true;
+    const wordsCand = normCand.split(/\s+/);
+    const wordsP = normP.split(/\s+/);
+    const common = wordsCand.filter(w => wordsP.includes(w));
+    if (common.length / Math.max(wordsCand.length, wordsP.length) > 0.5) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function selectResponse(candidates: string[], pastResponses: string[]): string {
+  const fresh = candidates.filter(cand => !isSimilar(cand, pastResponses));
+  if (fresh.length > 0) {
+    const randomIndex = Math.floor(Math.random() * fresh.length);
+    return fresh[randomIndex];
+  }
+  return candidates[0];
 }
