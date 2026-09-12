@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 // 1. Импорт ядра и вспомогательных сервисов Selin AI 2.0
 import { LLMService, llmService } from './core/LLMService';
 import { MemorySystem, memorySystem } from './core/MemorySystem';
-import { TTSService, ttsService, synthesizeForChat } from './services/TTSService';
+import { TTSService, ttsService, synthesizeForChat, speakable } from './services/TTSService';
 import { FlightService, flightService } from './services/FlightService';
 import { AgentOrchestrator, agentOrchestrator } from './core/AgentOrchestrator';
 import { SelinCore } from './core/SelinCore';
@@ -193,7 +193,7 @@ export function createServerApp(): ServerServices {
       }
 
       const chatId = options?.chatId || (req.query.chatId ? String(req.query.chatId) : 'default');
-      const audioBuffer = await synthesizeForChat(chatId, String(text));
+      const audioBuffer = await synthesizeForChat(chatId, speakable(String(text)));
       res.set({
         'Content-Type': 'audio/mpeg',
         'Content-Length': audioBuffer.length,
@@ -269,7 +269,7 @@ export function createServerApp(): ServerServices {
         const aiResponse = await selinOrchestrator.processMessage(userText, context);
 
         // Синтезируем голос для воспроизведения на колонке
-        const audioBuffer = await synthesizeForChat(speakerId, aiResponse.text);
+        const audioBuffer = await synthesizeForChat(speakerId, speakable(aiResponse.text));
 
         ws.send(JSON.stringify({
           type: 'response',

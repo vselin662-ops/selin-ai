@@ -8,7 +8,7 @@ import os from 'os';
 import { logger } from '../logger';
 import { ttsRequestsTotal } from "../metrics/prometheus";
 import { getVoiceGender } from '../../db';
-import { normalizeForSpeech, chunkText, sanitizeForTTS } from '../utils/textUtils';
+import { normalizeForSpeech, chunkText, sanitizeForTTS, speakable } from '../utils/textUtils';
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { synthesizeWithGroq, getCachedStaticAudio, saveCachedStaticAudio } from './tts/groq-tts';
 
@@ -227,10 +227,10 @@ export class TTSService {
   public async synthesize(text: string, options: TTSSynthesisOptions = {}, isSelfTest: boolean = false): Promise<Buffer | null> {
     let sanitizedText = text;
     try {
-      sanitizedText = sanitizeForTTS(text, options.skipStress);
+      sanitizedText = sanitizeForTTS(speakable(text), options.skipStress);
     } catch (err: any) {
       logger.error(`❌ [StressResolver] failed to resolve stress, using raw text: ${err?.message || err}`);
-      sanitizedText = text;
+      sanitizedText = speakable(text);
     }
     const cleanText = sanitizedText.trim();
     let voice = options.voice || process.env.TTS_VOICE || 'ru-RU-DmitryNeural';
@@ -676,7 +676,8 @@ export async function synthesizeForChat(
 ): Promise<Buffer | null> {
   const isSelfTest = (chatId === "test_self_check_chat");
 
-  const sanitized = sanitizeForTTS(text);
+  const speechText = speakable(text);
+  const sanitized = sanitizeForTTS(speechText);
 
   // Шаг 1: Проверка кэша статики
   const staticCached = await getCachedStaticAudio(sanitized);
@@ -755,3 +756,6 @@ export async function synthesizeForChat(
   const fallbackBuffer = await ttsService.synthesize(normalized, { voice, rate: numRate }, isSelfTest);
   return fallbackBuffer;
 }
+
+export { speakable };
+

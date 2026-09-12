@@ -1,9 +1,14 @@
 import { logger } from '../logger';
-import { synthesizeForChat } from '../services/TTSService';
+import { synthesizeForChat, speakable } from '../services/TTSService';
 import { sttService } from '../services/stt.service';
 import { AgentOrchestrator } from '../core/AgentOrchestrator';
 import { MessageContext, ChannelType } from '../core/types';
 import { stripMarkdown } from '../core/LLMService';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import ffmpegPath from 'ffmpeg-static';
 
 export class TelegramAdapter {
   private token: string;
@@ -75,12 +80,12 @@ export class TelegramAdapter {
         if (fileId) {
           const transcribed = await this.downloadAndTranscribe(fileId);
           if (!transcribed) {
-            await this.sendMessage(chatId, 'Не могу разобрать голос, напиши текстом.');
+            await this.sendMessage(chatId, 'Не разобрал голос, напиши текстом.');
             return res.status(200).json({ ok: true });
           }
           userText = transcribed;
         } else {
-          await this.sendMessage(chatId, 'Не могу разобрать голос, напиши текстом.');
+          await this.sendMessage(chatId, 'Не разобрал голос, напиши текстом.');
           return res.status(200).json({ ok: true });
         }
       } else if (message.photo) {
@@ -102,9 +107,16 @@ export class TelegramAdapter {
 
       if (isVoice) {
         try {
-          const audioBuffer = await synthesizeForChat(chatId, aiResponse.text);
+          const cleanedText = speakable ? speakable(aiResponse.text) : stripMarkdown(aiResponse.text).replace(/\([^)]*\)/g, '');
+          const audioBuffer = await synthesizeForChat(chatId, cleanedText);
           if (audioBuffer && audioBuffer.length > 0) {
-            await this.sendVoice(chatId, audioBuffer);
+            try {
+              const oggBuffer = await this.convertMp3ToOggOpus(audioBuffer);
+              await this.sendVoice(chatId, oggBuffer);
+            } catch (convErr: any) {
+              logger.warn('[Telegram] OGG conversion failed, falling back to MP3:', convErr?.message || convErr);
+              await this.sendAudio(chatId, audioBuffer);
+            }
           }
         } catch (ttsErr: any) {
           logger.warn('[Telegram] Voice synthesis failed:', ttsErr?.message || ttsErr);
@@ -146,6 +158,51 @@ export class TelegramAdapter {
     }
   }
 
+  private async convertMp3ToOggOpus(mp3Buffer: Buffer): Promise<Buffer> {
+    const ffCmd = ffmpegPath || 'ffmpeg';
+    const tempDir = os.tmpdir();
+    const tempInput = path.join(tempDir, `input_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`);
+    const tempOutput = path.join(tempDir, `output_${Date.now()}_${Math.random().toString(36).slice(2)}.ogg`);
+
+    try {
+      await fs.promises.writeFile(tempInput, mp3Buffer);
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(ffCmd, [
+          '-i', tempInput,
+          '-c:a', 'libopus',
+          '-b:a', '32k',
+          '-ar', '48000',
+          '-ac', '1',
+          tempOutput
+        ]);
+
+        let errStr = '';
+        proc.stderr.on('data', (chunk) => {
+          errStr += chunk.toString();
+        });
+
+        proc.on('close', (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`ffmpeg exited with code ${code}: ${errStr}`));
+          }
+        });
+
+        proc.on('error', (err) => {
+          reject(err);
+        });
+      });
+
+      const oggBuffer = await fs.promises.readFile(tempOutput);
+      return oggBuffer;
+    } finally {
+      await fs.promises.unlink(tempInput).catch(() => {});
+      await fs.promises.unlink(tempOutput).catch(() => {});
+    }
+  }
+
   async sendMessage(chatId: string, text: string): Promise<void> {
     try {
       let cleaned = stripMarkdown(text);
@@ -180,6 +237,24 @@ export class TelegramAdapter {
       }
     } catch (err: any) {
       logger.error('[Telegram] sendVoice error:', err?.message || err);
+    }
+  }
+
+  async sendAudio(chatId: string, audioBuffer: Buffer): Promise<void> {
+    try {
+      const formData = new FormData();
+      formData.append('chat_id', chatId);
+      formData.append('audio', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'voice.mp3');
+      const res = await fetch(`${this.baseUrl}/sendAudio`, {
+        method: 'POST',
+        body: formData
+      });
+      const data: any = await res.json();
+      if (!data.ok) {
+        logger.error('[Telegram] sendAudio failed:', JSON.stringify(data));
+      }
+    } catch (err: any) {
+      logger.error('[Telegram] sendAudio error:', err?.message || err);
     }
   }
 }

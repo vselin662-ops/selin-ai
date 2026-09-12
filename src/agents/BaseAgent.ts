@@ -60,8 +60,13 @@ export abstract class BaseAgent implements Agent {
   protected async callLLM(prompt: string, systemPrompt?: string): Promise<string> {
     try {
       this.logInfo(`Executing LLM request (prompt: ${prompt.length} chars)`);
+      const voiceStyleRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+      let effectiveSystem = systemPrompt || "";
+      if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+        effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceStyleRule;
+      }
       const response = await this.llm.call([
-        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+        ...(effectiveSystem ? [{ role: 'system', content: effectiveSystem }] : []),
         { role: 'user', content: prompt }
       ]);
       return response;

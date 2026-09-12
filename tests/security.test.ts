@@ -121,5 +121,101 @@ describe("Security & Component Tests", () => {
     const canaryCheck = checkOutputForCanary(`AI leaked ${token}`);
     assert.equal(canaryCheck.leaked, true);
   });
+
+  it("11. Telegram Voice Loop and Text Update Flow", async () => {
+    const { TelegramAdapter } = await import("../src/adapters/TelegramAdapter");
+
+    let processMessageCalledWithIsVoice = false;
+    const mockOrchestrator: any = {
+      processMessage: async (text: string, context: any) => {
+        processMessageCalledWithIsVoice = context.isVoice;
+        return { text: `Привет! Я услышал: ${text}` };
+      }
+    };
+
+    const adapter = new TelegramAdapter(mockOrchestrator);
+
+    // Mock downloadAndTranscribe to simulate voice file transcription
+    (adapter as any).downloadAndTranscribe = async (fileId: string) => {
+      return "привет";
+    };
+
+    // Spy on sending functions
+    let sendMessageCalls: string[] = [];
+    let sendVoiceCalls: Buffer[] = [];
+    let sendAudioCalls: Buffer[] = [];
+
+    adapter.sendMessage = async (chatId: string, text: string) => {
+      sendMessageCalls.push(text);
+    };
+
+    adapter.sendVoice = async (chatId: string, audioBuffer: Buffer) => {
+      sendVoiceCalls.push(audioBuffer);
+    };
+
+    adapter.sendAudio = async (chatId: string, audioBuffer: Buffer) => {
+      sendAudioCalls.push(audioBuffer);
+    };
+
+    // Mock convertMp3ToOggOpus to avoid running actual ffmpeg in this test
+    (adapter as any).convertMp3ToOggOpus = async (mp3Buffer: Buffer) => {
+      return Buffer.from("ogg_payload");
+    };
+
+    // 1. Test fake voice update
+    const mockVoiceReq = {
+      body: {
+        message: {
+          chat: { id: 12345 },
+          voice: { file_id: "voice_file_abc_123" }
+        }
+      },
+      headers: {}
+    };
+
+    let statusVal = 200;
+    let jsonVal: any = null;
+    const mockRes: any = {
+      status: (code: number) => {
+        statusVal = code;
+        return {
+          json: (data: any) => {
+            jsonVal = data;
+          }
+        };
+      }
+    };
+
+    await adapter.handleWebhook(mockVoiceReq, mockRes);
+
+    assert.equal(processMessageCalledWithIsVoice, true);
+    assert.ok(sendMessageCalls.length > 0);
+    assert.equal(sendVoiceCalls.length, 1);
+    assert.deepEqual(sendVoiceCalls[0], Buffer.from("ogg_payload"));
+
+    // Reset spies
+    sendMessageCalls = [];
+    sendVoiceCalls = [];
+    sendAudioCalls = [];
+    processMessageCalledWithIsVoice = false;
+
+    // 2. Test fake text update
+    const mockTextReq = {
+      body: {
+        message: {
+          chat: { id: 12345 },
+          text: "привет"
+        }
+      },
+      headers: {}
+    };
+
+    await adapter.handleWebhook(mockTextReq, mockRes);
+
+    assert.equal(processMessageCalledWithIsVoice, false);
+    assert.ok(sendMessageCalls.length > 0);
+    assert.equal(sendVoiceCalls.length, 0);
+    assert.equal(sendAudioCalls.length, 0);
+  });
 });
 

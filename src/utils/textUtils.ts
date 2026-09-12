@@ -1,6 +1,7 @@
 import { logger } from "../logger";
 import { normalizeForVoice as normalizeVoiceUtil, normalizeForSpeech as normalizeSpeechUtil, numberToWords } from "./voiceNormalizer";
 import { preprocessTextForTTS, applyStressDict, prepareIntonation, TTSEngineType } from "../services/StressService";
+import { stripMarkdown } from "../core/LLMService";
 
 /**
  * Словарь ударений (STRESS_DICT) для правильного произношения TTS.
@@ -438,5 +439,86 @@ export function sanitizeForTTS(text: string, skipStress: boolean = false): strin
 
   return cleaned;
 }
+
+/**
+ * Подготовка текста для чистого литературного воспроизведения голосом (TTS)
+ * 1. stripMarkdown
+ * 2. Удаление вставок в круглых (...) и квадратных [...] скобках
+ * 3. Удаление URL, эмодзи, служебных спецсимволов (* _ ` # >)
+ * 4. Преобразование списков ("- пункт", "* пункт") в связные предложения с точкой
+ * 5. Схлопывание двойных пробелов и переносов строк
+ * 6. Обрезка по границе предложения при превышении 700 символов
+ */
+export function speakable(text: string): string {
+  if (!text) return "";
+  let res = String(text);
+
+  // 1. Удаление URL
+  res = res.replace(/https?:\/\/\S+|www\.\S+/gi, "");
+
+  // 2. stripMarkdown
+  res = stripMarkdown(res);
+
+  // 3. Удаление ВСЕХ вставок в скобках (...) и [...] вместе с содержимым
+  while (/\([^)]*\)/.test(res)) {
+    res = res.replace(/\([^)]*\)/g, "");
+  }
+  while (/\[[^\]]*\]/.test(res)) {
+    res = res.replace(/\[[^\]]*\]/g, "");
+  }
+  res = res.replace(/[()\[\]]/g, "");
+
+  // 4. Удаление эмодзи и символов * _ ` # >
+  res = res.replace(/[\p{Extended_Pictographic}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, "");
+  res = res.replace(/[*_`#>]/g, "");
+
+  // 5. Преобразование маркированных пунктов ("- item", "* item") в связные предложения с точкой
+  res = res.replace(/(?:^|\n|\s+)[\-\*\•\–—]\s+/g, "\n• ");
+  const lines = res.split("\n");
+  const processed = lines.map(line => {
+    let trimmed = line.trim();
+    if (trimmed.startsWith("• ")) {
+      let content = trimmed.slice(2).trim();
+      if (content) {
+        content = content.replace(/[.,;:]+$/, "").trim();
+        if (content) {
+          content = content.charAt(0).toUpperCase() + content.slice(1) + ".";
+          return content;
+        }
+      }
+      return "";
+    }
+    return trimmed;
+  });
+  res = processed.filter(Boolean).join(" ");
+
+  // Удаление оставшихся дефисов, тире и маркеров списка
+  res = res.replace(/^[\-\*\•\–—]\s*/gm, "");
+  res = res.replace(/\s+[\-\*\•\–—]\s+/g, ". ");
+  res = res.replace(/[\-\–—]/g, " ");
+
+  // 6. Схлопывание двойных пробелов и переносов строк
+  res = res.replace(/\r\n/g, "\n");
+  res = res.replace(/\n+/g, " ");
+  res = res.replace(/\s+/g, " ");
+  res = res.replace(/\s*([.,!?;:])\s*/g, "$1 ");
+  res = res.replace(/\.{2,}/g, ".");
+  res = res.replace(/\. \./g, ".");
+  res = res.trim();
+
+  // 7. Обрезка по границе предложения при превышении 700 символов
+  if (res.length > 700) {
+    const sub = res.slice(0, 700);
+    const lastBoundary = Math.max(sub.lastIndexOf("."), sub.lastIndexOf("!"), sub.lastIndexOf("?"));
+    if (lastBoundary > 100) {
+      res = sub.slice(0, lastBoundary + 1).trim();
+    } else {
+      res = sub.trim() + ".";
+    }
+  }
+
+  return res;
+}
+
 
 

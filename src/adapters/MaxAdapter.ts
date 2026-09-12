@@ -6,7 +6,7 @@ import { SelinCore } from "../core/SelinCore";
 import { AIResponse, MessageContext, ChannelType, VoiceMode } from "../core/types";
 import { logger } from "../logger";
 import { VoiceService } from "../services/VoiceService";
-import { synthesizeForChat } from "../services/TTSService";
+import { synthesizeForChat, speakable } from "../services/TTSService";
 import { HOOK_TEXT, VOICE_HOOK_TEXT, getStartHookAudio } from "../services/StartHookService";
 import { ensureMp3Buffer } from "../lib/audioConvert";
 import { llmService, callVision, stripMarkdown } from "../core/LLMService";
@@ -369,7 +369,7 @@ export class MaxAdapter {
    * Очистка и нормализация текста перед синтезом голоса
    */
   public cleanText(text: string): string {
-    return normalizeForVoice(text);
+    return speakable(text);
   }
 
   /**
@@ -1137,8 +1137,8 @@ export class MaxAdapter {
 
     if (!voiceSent) {
       try {
-        const { synthesizeForChat } = await import("../services/TTSService");
-        audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
+        const { synthesizeForChat, speakable } = await import("../services/TTSService");
+        audio = await synthesizeForChat(cleanId, speakable(VOICE_HOOK_TEXT), { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
         if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
           voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
         }
@@ -1363,8 +1363,8 @@ export class MaxAdapter {
         // 3. Если нет → синтезировать сейчас; если и это null → отправить HOOK_TEXT обычным текстом
         if (!voiceSent) {
           try {
-            const { synthesizeForChat } = await import("../services/TTSService");
-            audio = await synthesizeForChat(cleanId, VOICE_HOOK_TEXT, { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
+            const { synthesizeForChat, speakable } = await import("../services/TTSService");
+            audio = await synthesizeForChat(cleanId, speakable(VOICE_HOOK_TEXT), { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
             if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
               voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
             }

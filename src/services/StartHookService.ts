@@ -1,8 +1,9 @@
 import { logger } from "../logger";
+import { speakable } from "../utils/textUtils";
 
 export const HOOK_TEXT = `Здравствуйте! Меня зовут Селин. Я ваш голосовой помощник и собеседник. Я живу здесь, в этом чате, и работаю для вас круглые сутки. Со мной можно просто поговорить по душам. Я помогу собрать заказ к ужину и посчитаю, сколько это стоит. Я прочитаю вам План Победы на сегодня и помолчу рядом, когда нужно молчание. Я напомню о важном и не дам забыть о главном. А ещё я умею слушать. Просто напишите мне или скажите голосом. Подскажите, с чего мы начнём нашу беседу?`;
 
-export const VOICE_HOOK_TEXT = HOOK_TEXT;
+export const VOICE_HOOK_TEXT = speakable(HOOK_TEXT);
 
 export function sanitizeStartHookText(text: string): string {
   if (!text) return "";

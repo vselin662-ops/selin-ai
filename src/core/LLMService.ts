@@ -363,13 +363,18 @@ export async function callVision(userText: string, dataUrl: string): Promise<str
 export async function callWithWebSearch(userMessage: string, systemPrompt: string): Promise<string | null> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return null;
+  const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+  let effectiveSystem = systemPrompt || "";
+  if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+    effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
+  }
   try {
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://selin.ai', 'X-Title': 'SelinAI' },
       body: JSON.stringify({
         model: 'google/gemini-2.0-flash-exp:free:online',
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+        messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
         temperature: 0.7,
         reasoning: { exclude: true },
         include_reasoning: false
@@ -542,12 +547,17 @@ export class LLMService {
   }
 
   private async callWithSystem(userMessage: string, systemPrompt: string): Promise<string | null> {
+    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+    let effectiveSystem = systemPrompt || "";
+    if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+      effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
+    }
     try {
       const groq = this.getGroqClient();
       if (groq) {
         const model = await pickGroqModel();
         const completion = await groq.chat.completions.create({
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+          messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
           model: model,
           temperature: 0.7,
           max_tokens: 800,
@@ -566,7 +576,7 @@ export class LLMService {
           model: GEMINI_MODEL,
           contents: [{ role: 'user', parts: [{ text: userMessage }] }],
           config: {
-            systemInstruction: systemPrompt,
+            systemInstruction: effectiveSystem,
             temperature: 0.7
           }
         });
@@ -581,12 +591,17 @@ export class LLMService {
   }
 
   private async callWithSystemDirect(userMessage: string, systemPrompt: string): Promise<string | null> {
+    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+    let effectiveSystem = systemPrompt || "";
+    if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+      effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
+    }
     try {
       const groq = this.getGroqClient();
       if (groq) {
         const model = await pickGroqModel();
         const completion = await groq.chat.completions.create({
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+          messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
           model: model,
           temperature: 0.7,
           max_tokens: 2000,
@@ -605,7 +620,7 @@ export class LLMService {
           model: GEMINI_MODEL,
           contents: [{ role: 'user', parts: [{ text: userMessage }] }],
           config: {
-            systemInstruction: systemPrompt,
+            systemInstruction: effectiveSystem,
             temperature: 0.7
           }
         });
@@ -650,8 +665,13 @@ export class LLMService {
       });
 
       const messages: any[] = [];
-      if (systemPrompt) {
-        messages.push({ role: 'system', content: systemPrompt });
+      let effectiveSystem = systemPrompt || "";
+      const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+      if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+        effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
+      }
+      if (effectiveSystem) {
+        messages.push({ role: 'system', content: effectiveSystem });
       }
       messages.push({ role: 'user', content: message });
 
@@ -847,9 +867,14 @@ ${identityBlock}
 Устаревшие данные 2023-2024 — не использовать как текущие.
 
 Твой стиль: дружелюбный, конкретный, как живой эксперт. Короткие ответы по делу.
+Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.
 `;
 
     let finalSystem = systemPrompt || defaultSystem;
+    const VOICE_STYLE_RULE = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+    if (!finalSystem.includes("Когда ответ озвучивается голосом")) {
+      finalSystem += `\n\n${VOICE_STYLE_RULE}`;
+    }
     try {
       const { profilePrompt } = await import("../services/ProfileService");
       const userProfileText = await profilePrompt(chatId);
@@ -1067,6 +1092,11 @@ ${identityBlock}
           }
         }
 
+        const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+        if (!systemInstruction.includes("Когда ответ озвучивается голосом")) {
+          systemInstruction = (systemInstruction ? systemInstruction + "\n\n" : "") + voiceRule;
+        }
+
         const config: any = {
           temperature: 0.8
         };
@@ -1119,8 +1149,13 @@ ${identityBlock}
 
   private convertGeminiToGroqMessages(contents: any, systemInstruction?: string): any[] {
     const messages: any[] = [];
-    if (systemInstruction) {
-      messages.push({ role: 'system', content: systemInstruction });
+    let effectiveSystem = systemInstruction || "";
+    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+    if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
+      effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
+    }
+    if (effectiveSystem) {
+      messages.push({ role: 'system', content: effectiveSystem });
     }
 
     if (Array.isArray(contents)) {
@@ -1492,6 +1527,12 @@ ${identityBlock}
       'gemini-3.8-flash'
     ]));
 
+    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
+    let finalInstruction = systemPrompt || "";
+    if (!finalInstruction.includes("Когда ответ озвучивается голосом")) {
+      finalInstruction = (finalInstruction ? finalInstruction + "\n\n" : "") + voiceRule;
+    }
+
     let lastError: any = null;
     for (const modelName of candidateModels) {
       try {
@@ -1499,7 +1540,7 @@ ${identityBlock}
           model: modelName,
           contents: contents,
           config: {
-            systemInstruction: systemPrompt || undefined,
+            systemInstruction: finalInstruction,
             temperature: 0.8
           }
         });
