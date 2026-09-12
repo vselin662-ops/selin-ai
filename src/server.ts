@@ -113,12 +113,8 @@ export function createServerApp(): ServerServices {
 
   // Telegram Webhook
   app.post('/api/telegram/webhook', async (req, res) => {
-    try {
-      await telegramAdapter.handleWebhook(req, res);
-    } catch (err: any) {
-      logger.error('Telegram Webhook error:', err);
-      return res.status(200).json({ ok: false });
-    }
+    try { await telegramAdapter.handleWebhook(req, res); }
+    catch (err: any) { logger.error('Telegram Webhook error:', err); return res.status(200).json({ ok: false }); }
   });
 
   // Очистка и сброс контекста диалога

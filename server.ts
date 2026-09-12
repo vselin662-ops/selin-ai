@@ -28,6 +28,8 @@ import { trackUserRateAndAnomalies } from "./src/services/agent-monitor";
 import { llmService } from "./src/core/LLMService";
 import { SelinCore } from "./src/core/SelinCore";
 import { MaxAdapter as ModernMaxAdapter } from "./src/adapters/MaxAdapter";
+import { TelegramAdapter } from "./src/adapters/TelegramAdapter";
+import { agentOrchestrator } from "./src/core/AgentOrchestrator";
 import { checkRequiredEnvVars } from "./src/config/env";
 import { initSessionsDb, closeDatabase } from "./src/index";
 
@@ -142,6 +144,9 @@ export const selinCore = new SelinCore(selinLLMService);
 export const modernMaxAdapter = new ModernMaxAdapter(selinCore, process.env.MAX_BOT_TOKEN);
 modernMaxAdapter.connect().catch((err) => logger.error("Failed to connect modernMaxAdapter", { error: err }));
 
+export const telegramAdapter = new TelegramAdapter(agentOrchestrator);
+telegramAdapter.registerWebhook().catch((err) => logger.error("Failed to register Telegram webhook", { error: err }));
+
 // 4. MAX Messenger Webhook Endpoints
 app.post(["/api/max/webhook", "/max/webhook"], async (req, res) => {
   try {
@@ -157,24 +162,30 @@ app.get(["/api/max/webhook", "/max/webhook"], (req, res) => {
   return res.status(200).json({ ok: true });
 });
 
+// Telegram Webhook
+app.post('/api/telegram/webhook', async (req, res) => {
+  try { await telegramAdapter.handleWebhook(req, res); }
+  catch (err: any) { logger.error('Telegram Webhook error:', err); return res.status(200).json({ ok: false }); }
+});
+
 // 5. Security & Rate Limiting Middlewares for /api routes
 app.use("/api", (req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
+  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/telegram") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
   return aiShieldMiddleware(req, res, next);
 });
 
 app.use("/api", (req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
+  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/telegram") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
   return apiRateLimiter(req, res, next);
 });
 
 app.use(["/api/tts", "/api/synthesize", "/api/voice-organism-dialogue"], (req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/")) return next();
+  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/telegram") || req.originalUrl.startsWith("/api/ai/")) return next();
   return expensiveOpLimiter(req, res, next);
 });
 
 app.use("/api", (req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
+  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/telegram") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
   const tenantId = (req as any).user?.tenant_id || (req as any).user?.chatId || "default";
   trackUserRateAndAnomalies(tenantId);
   next();
@@ -182,7 +193,7 @@ app.use("/api", (req, res, next) => {
 
 // Output Sanitization Filter
 app.use((req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
+  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/telegram") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments")) return next();
   const originalJson = res.json;
   const originalSend = res.send;
   const tenantId = (req as any).user?.tenant_id || (req as any).user?.chatId || "default";

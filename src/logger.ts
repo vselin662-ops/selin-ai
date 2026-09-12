@@ -55,8 +55,9 @@ class Logger {
     return new Logger({ ...this.defaultContext, ...context });
   }
 
-  private formatMessage(level: "info" | "warn" | "error", message: string, context: LogContext = {}): string {
-    const merged = { ...this.defaultContext, ...context };
+  private formatMessage(level: "info" | "warn" | "error", message: string, context: any = {}): string {
+    const ctx = typeof context === "object" && context !== null ? context : { data: context };
+    const merged = { ...this.defaultContext, ...ctx };
     const sanitized = sanitizeData(merged);
 
     const logEntry: Record<string, any> = {
@@ -89,15 +90,15 @@ class Logger {
     return JSON.stringify(logEntry);
   }
 
-  public info(message: string, context?: LogContext): void {
+  public info(message: string, context?: LogContext | any): void {
     console.log(this.formatMessage("info", message, context));
   }
 
-  public warn(message: string, context?: LogContext): void {
+  public warn(message: string, context?: LogContext | any): void {
     console.warn(this.formatMessage("warn", message, context));
   }
 
-  public error(message: string, context?: LogContext): void {
+  public error(message: string, context?: LogContext | any): void {
     console.error(this.formatMessage("error", message, context));
   }
 }
