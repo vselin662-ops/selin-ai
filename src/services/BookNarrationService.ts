@@ -1,5 +1,5 @@
 import { sqliteDb } from '../../db';
-import { aiOrchestrator } from './aiOrchestrator';
+import { aiOrchestrator } from './ai/aiOrchestrator';
 import { logger } from '../logger';
 
 export interface BookState {

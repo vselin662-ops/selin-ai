@@ -23,8 +23,8 @@ import { metrics } from "./src/metrics";
 import { getPrometheusMetrics, getPrometheusContentType } from "./src/metrics/prometheus";
 import { requestIdMiddleware } from "./src/middleware/requestId";
 import { aiShieldMiddleware } from "./src/middleware/ai-shield";
-import { filterAIOutput } from "./src/services/output-filter";
-import { trackUserRateAndAnomalies } from "./src/services/agent-monitor";
+import { filterAIOutput } from "./src/services/security/output-filter";
+import { trackUserRateAndAnomalies } from "./src/services/ai/agent-monitor";
 import { llmService } from "./src/core/LLMService";
 import { SelinCore } from "./src/core/SelinCore";
 import { MaxAdapter as ModernMaxAdapter } from "./src/adapters/MaxAdapter";
@@ -62,7 +62,7 @@ export {
   normalizeHours12
 } from "./src/utils/voiceNormalizer";
 export { cleanForMax, prepareVoiceText, normalizeForVoice, splitTextSmart } from "./src/utils/textUtils";
-export { handleBibleSubscription } from "./src/services/bibleCommands";
+export { handleBibleSubscription } from "./src/services/bible/bibleCommands";
 export {
   startBibleScheduler,
   checkAndSendBibleBroadcast,
@@ -74,7 +74,7 @@ export {
   skipUserPlanDays,
   getUserPlanDay,
   isPlanFileExisting
-} from "./src/services/bibleService";
+} from "./src/services/bible/bibleService";
 export {
   handleCallback,
   handleCityInput,
@@ -84,8 +84,8 @@ export {
   isWaitingForCity,
   setWaitingForCity
 } from "./src/services/CallbackRouter";
-import { startBibleScheduler } from "./src/services/bibleService";
-import { startMorningScheduler } from "./src/services/morningBriefing";
+import { startBibleScheduler } from "./src/services/bible/bibleService";
+import { startMorningScheduler } from "./src/services/planning/morningBriefing";
 import { SecurityGateway } from "./src/core/SecurityGateway";
 
 dotenv.config({ override: true });
@@ -309,7 +309,7 @@ async function startServer() {
         logger.info(`🚑 [Fix] emergency activation: ${clientChatId} month`);
       }
 
-      const { ensureNewUserPlanProfile } = await import("./src/services/ProfileService");
+      const { ensureNewUserPlanProfile } = await import("./src/services/ai/ProfileService");
       ensureNewUserPlanProfile(clientChatId);
       console.log(`🕊 [Fix] Auto-enabled Victory Plan for client ${clientChatId}`);
       logger.info(`🕊 [Fix] Auto-enabled Victory Plan for client ${clientChatId}`);
@@ -369,7 +369,7 @@ async function startServer() {
     // Start Reminder Scheduler
     setInterval(async () => {
       try {
-        const { checkAndSendReminders } = await import("./src/services/ReminderService");
+        const { checkAndSendReminders } = await import("./src/services/planning/ReminderService");
         await checkAndSendReminders(async (chatId, text) => {
           await modernMaxAdapter.sendMessage(chatId, text);
         });
@@ -381,7 +381,7 @@ async function startServer() {
     // Run Voice Synthesis Self-Test & Start Hook Pre-generation
     (async () => {
       try {
-        const { synthesizeForChat } = await import("./src/services/TTSService");
+        const { synthesizeForChat } = await import("./src/services/voice/TTSService");
         logger.info("🧪 [Voice Self-Test] Initiating voice synthesis self-test...");
         const testChatId = "test_self_check_chat";
         const testText = "Здравствуйте, я Селин, ваш помощник";
@@ -397,7 +397,7 @@ async function startServer() {
 
       // Pre-generate Start Voice Hook (asynchronously, non-blocking)
       try {
-        const { pregenerateStartHook } = await import("./src/services/StartHookService");
+        const { pregenerateStartHook } = await import("./src/services/voice/StartHookService");
         await pregenerateStartHook(true);
       } catch (err: any) {
         logger.warn(`⚠️ [StartHook] Server startup pre-generation error: ${err?.message || err}`);

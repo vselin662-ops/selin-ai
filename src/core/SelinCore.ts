@@ -181,6 +181,22 @@ export class SelinCore {
 
     const effectiveText = wakeResult.detected ? wakeResult.cleanedText : userMessage;
 
+    // === INTERCEPT HELP AND MENU COMMANDS ===
+    const trimmedHelp = effectiveText.trim().toLowerCase();
+    if (trimmedHelp === '/help' || trimmedHelp === '/menu' || trimmedHelp === 'help' || trimmedHelp === 'menu') {
+      const { getRegistryHelpText } = await import('../services/CapabilityRegistry');
+      const helpText = getRegistryHelpText();
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      return {
+        text: helpText,
+        confidence: 1.0,
+        voice: isVoiceResponse ? { format: 'ogg' } : undefined
+      };
+    }
+
     // --- INTERCEPT GREETINGS AND DUPLICATES ---
     try {
       const history = await cacheService.getHistory(context.chatId);
@@ -326,7 +342,7 @@ export class SelinCore {
     }
 
     // Check Bible broadcast subscription command & confirmation
-    const { handleBibleSubscription } = await import("../services/bibleCommands");
+    const { handleBibleSubscription } = await import("../services/bible/bibleCommands");
     const bibleReply = await handleBibleSubscription(context.chatId, effectiveText, context.isVoice);
     if (bibleReply) {
       if (bibleReply === "[HANDLED_WITH_BUTTONS]") {
@@ -391,7 +407,7 @@ export class SelinCore {
       const isNo = /^(?:нет|❌\s*нет|не\s*подтверждаю|мне\s*нет\s*18|мне\s*меньше\s*18|нету\s*18|отмена|adult_confirm_no)$/i.test(trimmedText);
 
       if (isYes) {
-        const { setAdultConfirmed } = await import("../services/ProfileService");
+        const { setAdultConfirmed } = await import("../services/ai/ProfileService");
         setAdultConfirmed(cleanChatId, true);
         console.log(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = да`);
         logger.info(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = да`);
@@ -422,7 +438,7 @@ export class SelinCore {
 
     // === ПЕРЕХВАТ 18+ ТЕМАТИКИ ДЛЯ НЕПОДТВЕРЖДЁННЫХ ПОЛЬЗОВАТЕЛЕЙ (ФЗ-436) ===
     if (SecurityGateway.isAdultContent(effectiveText)) {
-      const { isAdultConfirmed } = await import("../services/ProfileService");
+      const { isAdultConfirmed } = await import("../services/ai/ProfileService");
       const confirmed = isAdultConfirmed(cleanChatId);
       if (!confirmed) {
         SecurityGateway.setPendingAdultQuestion(cleanChatId, effectiveText);
@@ -440,7 +456,7 @@ export class SelinCore {
 
     // === САМООБУЧЕНИЕ СТИЛЯ: АНАЛИЗ РЕАКЦИЙ (спасибо / тупишь / переделай / подробнее) ===
     try {
-      const { analyzeFeedback } = await import("../services/PersonalityService");
+      const { analyzeFeedback } = await import("../services/ai/PersonalityService");
       await analyzeFeedback(context.chatId, effectiveText);
     } catch (feedbackErr) {
       logger.warn(`⚠️ [SelinCore] Error analyzing feedback: ${feedbackErr}`);
@@ -448,14 +464,14 @@ export class SelinCore {
 
     // === ЕДИНОРАЗОВЫЙ ОНБОРДИНГ ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ ===
     try {
-      const { handleOnboarding } = await import("../services/ProfileService");
+      const { handleOnboarding } = await import("../services/ai/ProfileService");
       const onboardingResult = await handleOnboarding(context.chatId, effectiveText);
       if (onboardingResult.handled && onboardingResult.replyText) {
         const isVoiceResponse = context.isVoice ||
           context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
           context.voiceMode === VoiceMode.VOICE_TO_VOICE;
 
-        const { recordLastResponse } = await import("../services/PersonalityService");
+        const { recordLastResponse } = await import("../services/ai/PersonalityService");
         recordLastResponse(context.chatId, onboardingResult.replyText);
 
         return {
@@ -492,7 +508,7 @@ export class SelinCore {
 
     let styleDirectives = "";
     try {
-      const { getStyleDirectives } = await import("../services/PersonalityService");
+      const { getStyleDirectives } = await import("../services/ai/PersonalityService");
       styleDirectives = await getStyleDirectives(context.chatId);
     } catch {}
 
@@ -601,7 +617,7 @@ ${genderPrompt}
       task.result = responseText;
 
       try {
-        const { recordLastResponse } = await import("../services/PersonalityService");
+        const { recordLastResponse } = await import("../services/ai/PersonalityService");
         recordLastResponse(context.chatId, responseText);
       } catch {}
 

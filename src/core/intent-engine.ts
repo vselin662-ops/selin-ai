@@ -1,4 +1,4 @@
-import { geminiService } from '../services/gemini.service';
+import { geminiService } from '../services/ai/gemini.service';
 import { logger } from '../logger';
 
 export type IntentType =

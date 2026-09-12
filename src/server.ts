@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 // 1. Импорт ядра и вспомогательных сервисов Selin AI 2.0
 import { LLMService, llmService } from './core/LLMService';
 import { MemorySystem, memorySystem } from './core/MemorySystem';
-import { TTSService, ttsService, synthesizeForChat, speakable } from './services/TTSService';
+import { TTSService, ttsService, synthesizeForChat, speakable } from './services/voice/TTSService';
 import { FlightService, flightService } from './services/FlightService';
 import { AgentOrchestrator, agentOrchestrator } from './core/AgentOrchestrator';
 import { SelinCore } from './core/SelinCore';

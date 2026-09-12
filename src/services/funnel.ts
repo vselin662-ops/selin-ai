@@ -1,6 +1,6 @@
 import { sqliteDb } from "../../db";
 import { logger } from "../logger";
-import { SCORING_QUESTIONS, evaluateAnswers } from "./scoring";
+import { SCORING_QUESTIONS, evaluateAnswers } from "./fintech/scoring";
 
 export interface FunnelState {
   chat_id: string;

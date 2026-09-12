@@ -1,6 +1,6 @@
 import { sqliteDb } from "../../db";
 import { logger } from "../logger";
-import { searchWeb } from "../services/WebSearchService";
+import { searchWeb } from "../services/ai/WebSearchService";
 import { llmService } from "../core/LLMService";
 
 export interface LegalFact {

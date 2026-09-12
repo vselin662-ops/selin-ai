@@ -1,4 +1,4 @@
-import { Task, AIResponse, AgentCapability } from '../core/types';
+import { Task, AIResponse, AgentCapability, MessageContext } from '../core/types';
 import { LLMService, llmService } from '../core/LLMService';
 import { logger } from '../logger';
 
@@ -6,7 +6,7 @@ export interface Agent {
   name: string;
   description: string;
   capabilities: AgentCapability[];
-  canHandle(task: Task): boolean;
+  canHandle(task: Task | string, context?: MessageContext): boolean;
   execute(task: Task): Promise<AIResponse>;
   getStatus(): 'idle' | 'busy' | 'error';
 }
@@ -23,7 +23,7 @@ export abstract class BaseAgent implements Agent {
   protected status: 'idle' | 'busy' | 'error' = 'idle';
   protected llm: LLMService;
 
-  constructor(name: string, description: string, llm: LLMService = llmService) {
+  constructor(name: string = 'BaseAgent', description: string = 'AI Agent', llm: LLMService = llmService) {
     this.name = name;
     this.description = description;
     this.llm = llm;
@@ -32,12 +32,30 @@ export abstract class BaseAgent implements Agent {
   /**
    * Проверка возможности выполнения задачи данным агентом
    */
-  public abstract canHandle(task: Task): boolean;
+  public canHandle(taskOrMessage: Task | string, context?: MessageContext): boolean {
+    if (typeof taskOrMessage === 'string') {
+      return this.canHandleMessage(taskOrMessage, context!);
+    }
+    return this.canHandleTask(taskOrMessage);
+  }
+
+  public canHandleTask(_task: Task): boolean {
+    return true;
+  }
+
+  public canHandleMessage(_message: string, _context: MessageContext): boolean {
+    return true;
+  }
 
   /**
    * Выполнение задачи и генерация стандартизированного AIResponse
    */
-  public abstract execute(task: Task): Promise<AIResponse>;
+  public async execute(task: Task): Promise<AIResponse> {
+    if (typeof (this as any).process === 'function') {
+      return (this as any).process(task.payload?.message || '', task.context);
+    }
+    throw new Error(`execute method not implemented on agent ${this.name}`);
+  }
 
   /**
    * Получение текущего рабочего статуса агента

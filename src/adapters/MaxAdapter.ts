@@ -5,9 +5,9 @@ import crypto from 'crypto';
 import { SelinCore } from "../core/SelinCore";
 import { AIResponse, MessageContext, ChannelType, VoiceMode } from "../core/types";
 import { logger } from "../logger";
-import { VoiceService } from "../services/VoiceService";
-import { synthesizeForChat, speakable } from "../services/TTSService";
-import { HOOK_TEXT, VOICE_HOOK_TEXT, getStartHookAudio } from "../services/StartHookService";
+import { VoiceService } from "../services/voice/VoiceService";
+import { synthesizeForChat, speakable } from "../services/voice/TTSService";
+import { HOOK_TEXT, VOICE_HOOK_TEXT, getStartHookAudio } from "../services/voice/StartHookService";
 import { ensureMp3Buffer } from "../lib/audioConvert";
 import { llmService, callVision, stripMarkdown } from "../core/LLMService";
 import { sqliteDb, getVoiceConfig, setVoiceGender } from "../../db";
@@ -787,7 +787,7 @@ export class MaxAdapter {
     isVoiceInput: boolean
   ): Promise<boolean> {
     try {
-      const { PresentationService } = await import("../services/presentationService");
+      const { PresentationService } = await import("../services/presentation/presentationService");
       
       let styleGuide;
       if (dataUrl) {
@@ -1137,7 +1137,7 @@ export class MaxAdapter {
 
     if (!voiceSent) {
       try {
-        const { synthesizeForChat, speakable } = await import("../services/TTSService");
+        const { synthesizeForChat, speakable } = await import("../services/voice/TTSService");
         audio = await synthesizeForChat(cleanId, speakable(VOICE_HOOK_TEXT), { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
         if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
           voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
@@ -1277,7 +1277,7 @@ export class MaxAdapter {
       // plan_enabled = 1, plan_status = 'on_quiet', voice_on = 1, tz = 'Europe/Moscow', slot_times = '{"m":"07:30","n":"13:00","e":"21:00"}'
       if (!isOwnerSender && cleanId) {
         try {
-          const { ensureNewUserPlanProfile } = await import("../services/ProfileService");
+          const { ensureNewUserPlanProfile } = await import("../services/ai/ProfileService");
           ensureNewUserPlanProfile(cleanId);
         } catch (profErr) {
           logger.warn(`⚠️ [Profile] Failed to ensure plan profile for ${cleanId}:`, profErr);
@@ -1363,7 +1363,7 @@ export class MaxAdapter {
         // 3. Если нет → синтезировать сейчас; если и это null → отправить HOOK_TEXT обычным текстом
         if (!voiceSent) {
           try {
-            const { synthesizeForChat, speakable } = await import("../services/TTSService");
+            const { synthesizeForChat, speakable } = await import("../services/voice/TTSService");
             audio = await synthesizeForChat(cleanId, speakable(VOICE_HOOK_TEXT), { voice: "ru-RU-DmitryNeural", rate: 1.0, speed: 1.0 });
             if (audio && audio.length > 0 && !isNaN(numericId) && numericId > 0) {
               voiceSent = await this.sendSingleAudioBuffer(numericId, audio);
@@ -1450,7 +1450,7 @@ export class MaxAdapter {
           if (isTenantEnabledSetting) {
             const bindRow = sqliteDb.prepare("SELECT * FROM user_binds WHERE channel = 'max' AND channel_user_id = ?").get(cleanId);
             if (bindRow) {
-              const { transcribeLongAudio } = await import("../services/longVoice");
+              const { transcribeLongAudio } = await import("../services/voice/longVoice");
               transcribedText = await transcribeLongAudio(audioBuffer, (buf) => this.transcribeAudio(buf));
             }
           }
@@ -1529,7 +1529,7 @@ export class MaxAdapter {
           }
 
           // 3. Process long transcript if needed (> 150 words)
-          const { processLongTranscriptIfNeeded } = await import("../services/longVoice");
+          const { processLongTranscriptIfNeeded } = await import("../services/voice/longVoice");
           const longVoiceRes = await processLongTranscriptIfNeeded(cleanId, text);
           if (longVoiceRes.handled) {
             if (isVoiceInput) {
@@ -1650,7 +1650,7 @@ export class MaxAdapter {
 
       // Сохраняем полученную геолокацию
       if (hasLocation && userLat != null && userLon != null) {
-        const { setUserLocation } = await import("../services/ProfileService");
+        const { setUserLocation } = await import("../services/ai/ProfileService");
         setUserLocation(cleanId, userLat, userLon);
 
         // Если вместе с гео прислан запрос маршрута (например: гео + «как доехать до Шереметьево»)
@@ -1785,7 +1785,7 @@ export class MaxAdapter {
       if (isTestBriefing) {
         logger.info(`☀️ [Briefing] test sent chat=${cleanId}`);
         console.log(`☀️ [Briefing] test sent chat=${cleanId}`);
-        const { buildUserMorningBriefing } = await import("../services/morningBriefing");
+        const { buildUserMorningBriefing } = await import("../services/planning/morningBriefing");
         const senderName = raw.body?.message?.sender?.name || raw.message?.sender?.name || raw.sender?.name || 'Владелец';
         
         let briefingText = '';
@@ -1821,8 +1821,8 @@ export class MaxAdapter {
 
       if (isBriefingCommand) {
         logger.info(`❓ [Intent] fn=briefing chat=${cleanId}`);
-        const { getUserBriefingConfig } = await import("../services/ProfileService");
-        const { BRIEFING_QUESTION_EXTRA } = await import("../services/bibleService");
+        const { getUserBriefingConfig } = await import("../services/ai/ProfileService");
+        const { BRIEFING_QUESTION_EXTRA } = await import("../services/bible/bibleService");
         const cfg = getUserBriefingConfig(cleanId);
         const statusStr = cfg.briefing_enabled !== 0 ? 'вкл' : 'выкл';
         const cityStr = cfg.city || 'Москва';
@@ -1872,13 +1872,13 @@ export class MaxAdapter {
 
         if (!isOwnerSender) {
           // Обычный пользователь: просто отправляем текущий слот (текст + голос) без меню и кнопок
-          const { sendCurrentPlanSlot } = await import("../services/bibleCommands");
+          const { sendCurrentPlanSlot } = await import("../services/bible/bibleCommands");
           await sendCurrentPlanSlot(cleanId, isVoiceInput);
           return res.status(200).send('ok');
         }
 
         // Владелец: управление, кнопки и меню
-        const { getUserPlanConfig } = await import("../services/ProfileService");
+        const { getUserPlanConfig } = await import("../services/ai/ProfileService");
         const cfg = getUserPlanConfig(cleanId);
 
         if (lowerText.includes('настройк') || lowerText.includes('настроек') || lowerText.includes('настройки')) {
@@ -1891,7 +1891,7 @@ export class MaxAdapter {
           return res.status(200).send('ok');
         }
 
-        const { getNearestPlanSlotTime, PLAN_SIMPLE_EXTRA } = await import("../services/bibleService");
+        const { getNearestPlanSlotTime, PLAN_SIMPLE_EXTRA } = await import("../services/bible/bibleService");
         const isEnabled = (cfg.plan_status === 'on_buttons' || cfg.plan_status === 'on_quiet' || cfg.plan_enabled === 1) && cfg.plan_status !== 'off';
         const statusStr = isEnabled ? 'включён' : 'выключен';
 
@@ -1955,7 +1955,7 @@ export class MaxAdapter {
         lowerText === 'план_на_сегодня' ||
         lowerText === '/plan_today'
       ) {
-        const { getPlanDaySummary } = await import("../services/bibleService");
+        const { getPlanDaySummary } = await import("../services/bible/bibleService");
         const reply = getPlanDaySummary(cleanId, false);
         if (isVoiceInput) {
           await this.synthesizeAndSendVoice(cleanId, reply);
@@ -1971,7 +1971,7 @@ export class MaxAdapter {
         lowerText === 'план_на_завтра' ||
         lowerText === '/plan_tomorrow'
       ) {
-        const { getPlanDaySummary } = await import("../services/bibleService");
+        const { getPlanDaySummary } = await import("../services/bible/bibleService");
         const reply = getPlanDaySummary(cleanId, true);
         if (isVoiceInput) {
           await this.synthesizeAndSendVoice(cleanId, reply);
@@ -1988,7 +1988,7 @@ export class MaxAdapter {
          lowerText === '/plan_contents' ||
          lowerText === '/plan_content')
       ) {
-        const { getPlanContentsSummary } = await import("../services/bibleService");
+        const { getPlanContentsSummary } = await import("../services/bible/bibleService");
         const reply = getPlanContentsSummary();
         await this.safeSendMessageToChat(cleanId, reply);
         return res.status(200).send('ok');
@@ -1999,7 +1999,7 @@ export class MaxAdapter {
         lowerText.match(/^\/plan_skip\s+(-?\d+)/i);
       if (isOwner(cleanId) && skipMatch) {
         const skipDays = parseInt(skipMatch[1], 10);
-        const { skipUserPlanDays } = await import("../services/bibleService");
+        const { skipUserPlanDays } = await import("../services/bible/bibleService");
         const reply = skipUserPlanDays(cleanId, skipDays);
         if (isVoiceInput) {
           await this.synthesizeAndSendVoice(cleanId, reply);
@@ -2010,7 +2010,7 @@ export class MaxAdapter {
 
       // === КОМАНДА ВЛАДЕЛЬЦА 'план статистика' ===
       if (isOwner(cleanId) && (lowerText === 'план статистика' || lowerText === 'план_статистика' || lowerText === '/plan_stats')) {
-        const { getPlanStatistics } = await import("../services/bibleService");
+        const { getPlanStatistics } = await import("../services/bible/bibleService");
         const statsReply = getPlanStatistics();
         await this.safeSendMessageToChat(cleanId, statsReply);
         return res.status(200).send('ok');
@@ -2292,7 +2292,7 @@ export class MaxAdapter {
         // г. Библия (всегда бесплатно для всех)
         if (isBibleQuery(text)) {
           const isPlanSubscribe = lowerText === 'подписаться на библию' || lowerText === '/bible' || lowerText.includes('бог благ и милость его велика');
-          const { handleBibleSubscription } = await import("../services/bibleCommands");
+          const { handleBibleSubscription } = await import("../services/bible/bibleCommands");
           const bibleReply = await handleBibleSubscription(cleanId, isPlanSubscribe ? 'бог благ и милость его велика' : text, isVoiceInput);
           if (bibleReply) {
             if (bibleReply === "[HANDLED_WITH_BUTTONS]") {
@@ -2405,7 +2405,7 @@ export class MaxAdapter {
       // Библия для разблокированных
       if (isBibleQuery(text)) {
         const isPlanSubscribe = lowerText === 'подписаться на библию' || lowerText === '/bible' || lowerText.includes('бог благ и милость его велика');
-        const { handleBibleSubscription } = await import("../services/bibleCommands");
+        const { handleBibleSubscription } = await import("../services/bible/bibleCommands");
         const bibleReply = await handleBibleSubscription(cleanId, isPlanSubscribe ? 'бог благ и милость его велика' : text, isVoiceInput);
         if (bibleReply) {
           if (bibleReply === "[HANDLED_WITH_BUTTONS]") {
@@ -2443,7 +2443,7 @@ export class MaxAdapter {
 
       // Запуск адаптивного детектора пола обращения
       try {
-        const { detectGenderAndSet } = await import("../services/VoiceGenderService");
+        const { detectGenderAndSet } = await import("../services/voice/VoiceGenderService");
         detectGenderAndSet(cleanId, text);
       } catch (detectErr) {
         logger.warn(`⚠️ [VoiceGender] Error running detector: ${detectErr}`);
@@ -2593,7 +2593,7 @@ export class MaxAdapter {
         }
 
         try {
-          const { addReminder } = await import("../services/ReminderService");
+          const { addReminder } = await import("../services/planning/ReminderService");
           const fireDate = await addReminder(cleanId, timePart, reminderText);
           const localTimeStr = fireDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
           const localDateStr = fireDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
@@ -2617,7 +2617,7 @@ export class MaxAdapter {
 
       // 7. /profile или 'мой профиль'
       if (lowerText === '/profile' || lowerText === 'мой профиль') {
-        const { getProfile } = await import("../services/ProfileService");
+        const { getProfile } = await import("../services/ai/ProfileService");
         const profile = await getProfile(cleanId);
         if (profile && (profile.family_size || profile.diet_restrictions?.length || profile.stores?.length || profile.city || profile.interests?.length || profile.faith !== undefined)) {
           const parts = [];
@@ -2647,7 +2647,7 @@ export class MaxAdapter {
       // 8. /cart, 'собери', 'продукты на', 'корзину'
       const isCartTrigger = lowerText.startsWith('/cart') || lowerText.includes('собери') || lowerText.includes('продукты на') || lowerText.includes('корзину') || lowerText.includes('корзина') || lowerText.includes('список продуктов');
       if (isCartTrigger) {
-        const { getProfile } = await import("../services/ProfileService");
+        const { getProfile } = await import("../services/ai/ProfileService");
         const { buildCart } = await import("../services/CartService");
         const profile = await getProfile(cleanId);
         const cartResult = await buildCart(text, profile, cleanId);
@@ -2682,7 +2682,7 @@ export class MaxAdapter {
       const isAboutSelf = /(?:нас|семья|чел|едим|огранич|аллерги|свинин|магазин|живу|рядом|пятёрочк|вкусвилл|перекресток)/i.test(lowerText) &&
                           (/(?:семья|человек|едим|огранич|живу|магазин|город|аллерги|ограничен|религи|веру|христиа)/i.test(lowerText) || lowerText.includes("о себе"));
       if (isAboutSelf) {
-        const { extractProfile } = await import("../services/ProfileService");
+        const { extractProfile } = await import("../services/ai/ProfileService");
         const profile = await extractProfile(text, cleanId);
         if (profile && (profile.family_size || profile.diet_restrictions?.length || profile.stores?.length || profile.city || profile.interests?.length || profile.faith !== undefined)) {
           const parts = [];

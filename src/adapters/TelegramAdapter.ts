@@ -1,6 +1,6 @@
 import { logger } from '../logger';
-import { synthesizeForChat, speakable } from '../services/TTSService';
-import { sttService } from '../services/stt.service';
+import { synthesizeForChat, speakable } from '../services/voice/TTSService';
+import { sttService } from '../services/voice/stt.service';
 import { AgentOrchestrator } from '../core/AgentOrchestrator';
 import { MessageContext, ChannelType } from '../core/types';
 import { stripMarkdown } from '../core/LLMService';

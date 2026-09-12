@@ -11,7 +11,7 @@
 
 export * from './base.adapter';
 export * from './MaxAdapter';
-export { MaxAdapter as LegacyMaxAdapter } from './max.adapter';
+export { MaxAdapter as LegacyMaxAdapter } from './MaxAdapter';
 export * from './TelegramAdapter';
 export * from './web.adapter';
 export * from './robot.adapter';

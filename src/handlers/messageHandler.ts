@@ -1,5 +1,5 @@
 import { hasUserInteractedBefore, markUserAsVisited } from '../database/sessions.db';
-import { getAIResponse } from '../services/aiOrchestrator';
+import { getAIResponse } from '../services/ai/aiOrchestrator';
 import { normalizeForVoice } from '../adapters/MaxAdapter';
 
 export async function handleIncomingMessage(

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { geminiService } from '../../services/gemini.service';
+import { geminiService } from '../../services/ai/gemini.service';
 import type { LanguageCode, Level, Lesson } from './types';
 import { SUPPORTED_LANGUAGES, TOPICS_BY_LEVEL } from '../../config/constants';
 import { logger } from '../../logger';

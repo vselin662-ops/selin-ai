@@ -17,8 +17,8 @@ import {
   setWaitingForCity,
   isWaitingForCity,
   RUSSIAN_TIMEZONES
-} from "./ProfileService";
-import { sendImmediatePlanPobedyVerse } from "./bibleService";
+} from "./ai/ProfileService";
+import { sendImmediatePlanPobedyVerse } from "./bible/bibleService";
 import { getLastCartList } from "./CartService";
 
 export {
@@ -48,7 +48,7 @@ export async function handleTextCommand(
   if (!isOwner(cleanId)) {
     // На текст "план победы" от обычного юзера — просто отправить текущий слот (как будто он попросил почитать), без меню
     if (lower === 'план победы' || lower === 'план_победы' || lower === '/plan') {
-      const { sendCurrentPlanSlot } = await import("./bibleCommands");
+      const { sendCurrentPlanSlot } = await import("./bible/bibleCommands");
       await sendCurrentPlanSlot(cleanId, isVoiceInput);
       return { handled: true, replyText: '' };
     }

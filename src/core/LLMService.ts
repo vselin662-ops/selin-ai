@@ -7,7 +7,7 @@ import { llmRequestsTotal, llmLatencySeconds } from "../metrics/prometheus";
 import { LRUCache } from "lru-cache";
 import { ChatMemory } from "./types";
 import { logger } from "../logger";
-import { searchWeb } from "../services/WebSearchService";
+import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
@@ -876,7 +876,7 @@ ${identityBlock}
       finalSystem += `\n\n${VOICE_STYLE_RULE}`;
     }
     try {
-      const { profilePrompt } = await import("../services/ProfileService");
+      const { profilePrompt } = await import("../services/ai/ProfileService");
       const userProfileText = await profilePrompt(chatId);
       if (userProfileText) {
         finalSystem += `\n\n⚠️ ${userProfileText}\nОбязательно учитывай этот профиль пользователя при формировании любых советов, планов продуктов, меню и рекомендаций!`;
@@ -886,7 +886,7 @@ ${identityBlock}
     }
 
     try {
-      const { getStyleDirectives } = await import("../services/PersonalityService");
+      const { getStyleDirectives } = await import("../services/ai/PersonalityService");
       const styleDirectives = await getStyleDirectives(chatId);
       if (styleDirectives) {
         finalSystem += `\n\n${styleDirectives}`;
@@ -911,7 +911,7 @@ ${identityBlock}
       try {
         let city = 'Moscow';
         try {
-          const { getUserBriefingConfig } = await import("../services/ProfileService");
+          const { getUserBriefingConfig } = await import("../services/ai/ProfileService");
           const briefingConfig = await getUserBriefingConfig(chatId);
           if (briefingConfig && briefingConfig.city) {
             city = briefingConfig.city;

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../../logger';
-import { HOOK_TEXT, VOICE_HOOK_TEXT } from '../StartHookService';
+import { HOOK_TEXT, VOICE_HOOK_TEXT } from '../voice/StartHookService';
 
 let groqTTSModelsCache: string[] | null = null;
 let groqTTSModelsCacheTime = 0;

@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { sqliteDb } from "../../db";
 import { logger } from "../logger";
-import { checkJailbreak } from "../services/jailbreak-detector";
-import { deductTrustScore, recordNormalRequest, isRestrictedMode } from "../services/trust-engine";
+import { checkJailbreak } from "../services/security/jailbreak-detector";
+import { deductTrustScore, recordNormalRequest, isRestrictedMode } from "../services/security/trust-engine";
 
 const ZERO_WIDTH_REGEX = /[\u200B\u200C\u200D\uFEFF]/g;
 

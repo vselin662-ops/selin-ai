@@ -9,7 +9,7 @@ import {
   processReviewAnswer,
 } from './language/language.module';
 import { calculateNextReview } from './language/spaced-repetition';
-import { geminiService } from '../services/gemini.service';
+import { geminiService } from '../services/ai/gemini.service';
 
 /**
  * Устанавливает текущий режим работы пользователя.

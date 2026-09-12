@@ -8,12 +8,12 @@ import { logger } from "../src/logger";
 import { metrics } from "../src/metrics";
 import { requestIdMiddleware } from "../src/middleware/requestId";
 import { sanitizePromptInput } from "../src/middleware/ai-shield";
-import { sanitizeRAGChunk } from "../src/services/rag-protection";
-import { verifyMcpToolIntegrity, executeMcpSandbox } from "../src/services/mcp-guardian";
-import { filterAIOutput } from "../src/services/output-filter";
-import { checkJailbreak } from "../src/services/jailbreak-detector";
-import { getTrustSession, deductTrustScore, recordNormalRequest } from "../src/services/trust-engine";
-import { checkOutputForCanary, activeCanaryTokens } from "../src/services/canary-tokens";
+import { sanitizeRAGChunk } from "../src/services/security/rag-protection";
+import { verifyMcpToolIntegrity, executeMcpSandbox } from "../src/services/security/mcp-guardian";
+import { filterAIOutput } from "../src/services/security/output-filter";
+import { checkJailbreak } from "../src/services/security/jailbreak-detector";
+import { getTrustSession, deductTrustScore, recordNormalRequest } from "../src/services/security/trust-engine";
+import { checkOutputForCanary, activeCanaryTokens } from "../src/services/security/canary-tokens";
 
 describe("Security & Component Tests", () => {
   it("1. MathJS Evaluation - Safe Math without Function/eval", () => {

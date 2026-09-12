@@ -1,4 +1,4 @@
-import { BaseAgent } from './base.agent';
+import { BaseAgent } from './BaseAgent';
 import { Task, MessageContext, AIResponse, TaskType } from '../core/types';
 
 /**

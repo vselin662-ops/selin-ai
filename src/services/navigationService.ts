@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { getUserLocation, saveUserLastRoute, getUserLastRoute, SavedRoute } from "./ProfileService";
+import { getUserLocation, saveUserLastRoute, getUserLastRoute, SavedRoute } from "./ai/ProfileService";
 
 // Rate limit: 1 запрос в минуту на пользователя
 const userNavCooldowns = new Map<string, number>();
@@ -436,7 +436,7 @@ export async function setManualLocation(
     };
   }
 
-  const { setUserLocation } = await import("./ProfileService");
+  const { setUserLocation } = await import("./ai/ProfileService");
   setUserLocation(cleanId, geocoded.lat, geocoded.lon);
 
   const displayAddress = geocoded.name || addressQuery;

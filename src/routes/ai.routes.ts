@@ -3,7 +3,7 @@ import { llmService } from "../core/LLMService";
 import { AgentOrchestrator } from "../core/AgentOrchestrator";
 import { MessageContext, ChannelType } from "../core/types";
 import { logger } from "../logger";
-import { agentQueueService } from "../services/agentQueueService";
+import { agentQueueService } from "../services/ai/agentQueueService";
 
 const aiRouter = Router();
 const orchestrator = new AgentOrchestrator(llmService);

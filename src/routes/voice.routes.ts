@@ -3,10 +3,10 @@ import multer from "multer";
 import { getVoiceConfig, setVoiceGender } from "../../db";
 import { normalizeForVoice } from "../utils/textUtils";
 import { detectVoiceWakeWord } from "../utils/wakeWord";
-import { transcribeAudioBuffer } from "../services/voiceProcessingService";
+import { transcribeAudioBuffer } from "../services/voice/voiceProcessingService";
 import { VoiceMode, ChannelType } from "../core/types";
 import { logger } from "../logger";
-import { synthesizeForChat } from "../services/TTSService";
+import { synthesizeForChat } from "../services/voice/TTSService";
 import { getSelinCore } from "../core/SelinCore";
 
 const voiceRouter = Router();

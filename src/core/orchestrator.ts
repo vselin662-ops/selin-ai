@@ -4,7 +4,7 @@ import { memorySystem, type Memory } from './memory';
 import { decisionEngine, type Action } from './decision-engine';
 import { emotionEngine } from './emotion-engine';
 import { planner } from './planner';
-import { ttsService, synthesizeForChat } from '../services/tts.service';
+import { ttsService, synthesizeForChat } from '../services/voice/TTSService';
 import { processMessage as processLanguageMessage, startLesson } from '../modules/language/language.module';
 import { businessModule } from '../modules/business';
 import { servicesModule } from '../modules/services';

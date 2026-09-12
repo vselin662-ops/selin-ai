@@ -1,4 +1,4 @@
-import { aiOrchestrator } from "../services/aiOrchestrator";
+import { aiOrchestrator } from "../services/ai/aiOrchestrator";
 import { logger } from "../logger";
 
 export interface SpecialistAnalysis {

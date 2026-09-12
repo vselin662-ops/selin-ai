@@ -2,7 +2,7 @@ import { generateLesson } from './lesson-generator';
 import { calculateNextReview, assessQuality } from './spaced-repetition';
 import { languageRepository } from '../../repositories/language.repository';
 import { userModeRepository } from '../../repositories/user-mode.repository';
-import { geminiService } from '../../services/gemini.service';
+import { geminiService } from '../../services/ai/gemini.service';
 import type { LanguageCode, Level, LanguageSettings } from './types';
 import { SUPPORTED_LANGUAGES, LEVELS, LESSONS_PER_LEVEL } from '../../config/constants';
 

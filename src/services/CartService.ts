@@ -1,6 +1,6 @@
 import { llmService } from "../core/LLMService";
 import { logger } from "../logger";
-import { UserProfile } from "./ProfileService";
+import { UserProfile } from "./ai/ProfileService";
 
 const BASE_PRICES: Record<string, { price: number; unit: string }> = {
   // Овощи и зелень

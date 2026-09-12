@@ -2,7 +2,7 @@ import { AIResponse, MessageContext } from "./types";
 import { LLMService, llmService } from "./LLMService";
 import { logger } from "../logger";
 import { CacheService } from "./CacheService";
-import { agentQueueService } from "../services/agentQueueService";
+import { agentQueueService } from "../services/ai/agentQueueService";
 
 export interface AgentConfig {
   name: string;

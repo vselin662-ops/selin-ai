@@ -1,7 +1,7 @@
 import type { IntelligenceModule, ActionResult } from '../base-module';
 import type { Intent } from '../../core/intent-engine';
 import type { Memory } from '../../core/memory';
-import { geminiService } from '../../services/gemini.service';
+import { geminiService } from '../../services/ai/gemini.service';
 
 export class KnowledgeModule implements IntelligenceModule {
   name = 'knowledge';

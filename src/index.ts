@@ -5,7 +5,7 @@
 
 export * from './database/sessions.db';
 export * from './handlers/messageHandler';
-export * from './services/aiOrchestrator';
+export * from './services/ai/aiOrchestrator';
 
 export * from './core';
 export * from './agents';
