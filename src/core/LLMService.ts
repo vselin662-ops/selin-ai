@@ -706,12 +706,12 @@ export class LLMService {
     const controller = new AbortController();
     const { signal } = controller;
 
-    // Глобальный таймаут на выполнение запроса на 30 секунд
+    // Глобальный таймаут на выполнение запроса на 45 секунд
     const timeoutPromise = new Promise<never>((_, reject) => {
       const timer = setTimeout(() => {
         controller.abort();
         reject(new Error("Timeout"));
-      }, 30000);
+      }, 45000);
       timer.unref();
     });
 
@@ -1024,9 +1024,9 @@ ${identityBlock}
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // 15s timeout per provider call
+        // 35s timeout per provider call
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Timeout 15s exceeded")), 15000);
+          setTimeout(() => reject(new Error("Timeout 35s exceeded")), 35000);
         });
         const res = await Promise.race([prov.call(), timeoutPromise]);
         const latency = Date.now() - provStart;

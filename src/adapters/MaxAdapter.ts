@@ -2323,6 +2323,9 @@ export class MaxAdapter {
         // Запоминаем ID пользователя, который ввел слово
         activationState.pendingChatId = String(cleanId);
         try {
+          if (!fs.existsSync("/app/data")) {
+            fs.mkdirSync("/app/data", { recursive: true });
+          }
           fs.writeFileSync(activationFilePath, JSON.stringify(activationState), 'utf8');
         } catch (e) {}
 
@@ -2337,6 +2340,9 @@ export class MaxAdapter {
           activationState.isActivated = true;
           activationState.pendingChatId = "";
           try {
+            if (!fs.existsSync("/app/data")) {
+              fs.mkdirSync("/app/data", { recursive: true });
+            }
             fs.writeFileSync(activationFilePath, JSON.stringify(activationState), 'utf8');
           } catch (e) {}
 
