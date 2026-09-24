@@ -143,6 +143,8 @@ export async function poll(): Promise<void> {
       queryPath = `/updates?marker=${encodeURIComponent(currentMarker)}&offset=${encodeURIComponent(currentMarker)}&limit=20&timeout=5`;
     }
 
+    console.log(`[AUTO-MAX-POLLER] Polling... path: ${queryPath}`);
+
     const req = https.request(
       {
         hostname: 'platform-api2.max.ru',
@@ -164,6 +166,7 @@ export async function poll(): Promise<void> {
 
         res.on('end', async () => {
           isPollingActive = false;
+          console.log(`[AUTO-MAX-POLLER] Response status: ${res.statusCode}. Body length: ${rawData.length}. Body: ${rawData}`);
           try {
             if (!rawData || rawData.trim() === '') {
               return;
