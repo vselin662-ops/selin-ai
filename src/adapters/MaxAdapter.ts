@@ -1019,7 +1019,7 @@ export class MaxAdapter {
     } else {
       chunks = splitTextSmart(cleanedText, 1400).slice(0, 4);
     }
-    chunks = chunks.filter(c => c && c.trim().length >= 10);
+    chunks = chunks.filter(c => c && c.trim().length > 0);
     console.log('🎙️ [TTS] символов=' + cleanedText.length + ' чанков=' + chunks.length);
 
     let sentAtLeastOne = false;
@@ -1063,26 +1063,43 @@ export class MaxAdapter {
    * Скачивание аудиофайла из MAX по прямому URL
    */
   private async downloadAudio(fileUrl: string): Promise<Buffer> {
-    const url = (fileUrl || '').trim();
+    let url = (fileUrl || '').trim();
+    const maxToken = this.token || process.env.MAX_BOT_TOKEN;
+    const headers: Record<string, string> = {
+      'Accept': 'audio/*, application/octet-stream'
+    };
+
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      throw new Error(`Нужна прямая ссылка payload.url, а не токен (получено: "${url}")`);
+      // It's a token! Convert it to a platform-api URL
+      url = `https://platform-api2.max.ru/uploads/${url}`;
+      if (maxToken) {
+        headers['Authorization'] = maxToken;
+      }
+      logger.info(`⬇️ [MaxAdapter] Converted token to platform-api2 URL: ${url}`);
     }
 
-    logger.info(`⬇️ [MaxAdapter] Скачивание аудио по прямой ссылке: ${url.substring(0, 80)}...`);
+    logger.info(`⬇️ [MaxAdapter] Скачивание аудио: ${url.substring(0, 80)}...`);
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Accept': 'audio/*, application/octet-stream'
-      },
+      headers,
       signal: AbortSignal.timeout(20000)
-    });
+    }).catch(() => null);
 
-    logger.info(`📊 [MaxAdapter] Ответ скачивания: HTTP ${response.status} ${response.statusText}`);
+    // Fallback to platform-api if platform-api2 fails and we converted from a token
+    if ((!response || !response.ok) && url.includes('platform-api2.max.ru')) {
+      const fallbackUrl = url.replace('platform-api2.max.ru', 'platform-api.max.ru');
+      logger.info(`⬇️ [MaxAdapter] Retrying download with platform-api URL: ${fallbackUrl}`);
+      response = await fetch(fallbackUrl, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(20000)
+      }).catch(() => null);
+    }
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'No error body');
-      throw new Error(`Failed to download audio (HTTP ${response.status}): ${errorText}`);
+    if (!response || !response.ok) {
+      const status = response ? response.status : 'network error';
+      throw new Error(`Failed to download audio (${status})`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -1480,7 +1497,7 @@ export class MaxAdapter {
         const mediaTypeStr = String(att?.media_type || '').toLowerCase();
         if (typeStr.includes('audio') || typeStr.includes('voice') || mediaTypeStr.includes('audio') || mediaTypeStr.includes('voice')) {
           isVoiceInput = true;
-          audioUrlOrToken = att.payload?.url || att.payload?.link || att.url || att.link || att.payload?.token || att.token || '';
+          audioUrlOrToken = att.payload?.url || att.payload?.link || att.url || att.link || att.payload?.token || att.token || att.payload?.id || att.id || att.payload?.file_id || att.file_id || '';
           logger.info(`🎤 Найдено аудио во вложениях, url/token: ${audioUrlOrToken}`);
           break;
         }
@@ -1492,6 +1509,16 @@ export class MaxAdapter {
           isVoiceInput = true;
           audioUrlOrToken = directUrl;
           logger.info(`🎤 Найдено прямое audio directUrl: ${audioUrlOrToken}`);
+        }
+      }
+
+      // Check top-level message types/bodies for voice indications as fallback
+      const rawMsgType = String(raw.body?.message?.type || raw.message?.type || raw.payload?.message?.type || raw.type || raw.body?.type || raw.payload?.type || '').toLowerCase();
+      if (rawMsgType.includes('voice') || rawMsgType.includes('audio')) {
+        isVoiceInput = true;
+        if (!audioUrlOrToken) {
+          audioUrlOrToken = raw.body?.message?.body?.mid || raw.message?.body?.mid || raw.payload?.message?.body?.mid || '';
+          logger.info(`🎤 Найдено верхнеуровневое указание на аудио (тип voice/audio), используем mid как токен: ${audioUrlOrToken}`);
         }
       }
 
