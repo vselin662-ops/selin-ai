@@ -2,6 +2,7 @@
 import { Bot } from "@maxhub/max-bot-api";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import crypto from 'crypto';
+import fs from 'fs';
 import { SelinCore } from "../core/SelinCore";
 import { AIResponse, MessageContext, ChannelType, VoiceMode } from "../core/types";
 import { logger } from "../logger";
@@ -2302,18 +2303,57 @@ export class MaxAdapter {
       }
 
       // === ШАГ 3: ПРОВЕРКА ДОСТУПА (Владелец / Активная подписка / Locked) ===
-      const secretActivationWord = "гость2026";
-      if (lowerText === secretActivationWord) {
-        const { activateSubscription } = await import("../fintech/subscriptions");
-        activateSubscription(cleanId, 'plan', 30);
-        const successMsg = '🔓 Поздравляю! Секретное кодовое слово принято. Вам активирован бесплатный доступ на 30 дней!';
-        await this.safeSendMessageToChat(cleanId, successMsg);
-        
-        // Уведомление владельцу
-        const ownerChatId = String(process.env.OWNER_CHAT_ID || '').trim();
-        if (ownerChatId && cleanId !== ownerChatId) {
-          const senderName = raw.user?.name || raw.sender?.name || raw.message?.sender?.name || raw.payload?.user?.name || cleanId;
-          await this.safeSendMessageToChat(ownerChatId, `🔑 Пользователь ${senderName} (ID: ${cleanId}) активировал гостевой доступ по кодовому слову!`);
+      const activationFilePath = "/app/data/guest_activation.json";
+      let activationState = { isActivated: false, pendingChatId: "" };
+      try {
+        if (fs.existsSync(activationFilePath)) {
+          activationState = JSON.parse(fs.readFileSync(activationFilePath, 'utf8'));
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // 1. Попытка ввода кодового слова
+      if (lowerText === "гость2026") {
+        if (activationState.isActivated) {
+          await this.safeSendMessageToChat(cleanId, "❌ Извините, это кодовое слово уже было использовано и более недействительно.");
+          return res.status(200).send('ok');
+        }
+
+        // Запоминаем ID пользователя, который ввел слово
+        activationState.pendingChatId = String(cleanId);
+        try {
+          fs.writeFileSync(activationFilePath, JSON.stringify(activationState), 'utf8');
+        } catch (e) {}
+
+        await this.safeSendMessageToChat(cleanId, "🔒 Секретное слово принято! Назовите свое имя, которое вы обсуждали с разработчиком:");
+        return res.status(200).send('ok');
+      }
+
+      // 2. Ожидание верификационного имени от этого конкретного чата
+      if (activationState.pendingChatId === String(cleanId) && !activationState.isActivated) {
+        if (lowerText === "папаволк") {
+          // Успех! Закрываем активацию навсегда
+          activationState.isActivated = true;
+          activationState.pendingChatId = "";
+          try {
+            fs.writeFileSync(activationFilePath, JSON.stringify(activationState), 'utf8');
+          } catch (e) {}
+
+          const { activateSubscription } = await import("../fintech/subscriptions");
+          activateSubscription(cleanId, 'plan', 30);
+
+          const successMsg = "🔓 Доступ успешно активирован! Добро пожаловать, Папаволк. Тебе предоставлены эксклюзивные привилегии тестирования Selin AI на 30 дней!";
+          await this.safeSendMessageToChat(cleanId, successMsg);
+
+          // Уведомление владельцу (Вадиму)
+          const ownerChatId = String(process.env.OWNER_CHAT_ID || '').trim();
+          if (ownerChatId && cleanId !== ownerChatId) {
+            await this.safeSendMessageToChat(ownerChatId, `🔥 Превосходно! Твой привилегированный тестер Папаволк (ID: ${cleanId}) успешно прошёл верификацию и активировал свой гостевой доступ по кодовому слову!`);
+          }
+        } else {
+          // Неверное имя
+          await this.safeSendMessageToChat(cleanId, "❌ Введите правильное имя:");
         }
         return res.status(200).send('ok');
       }
