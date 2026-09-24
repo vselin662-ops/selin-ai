@@ -1,6 +1,8 @@
 import { hasUserInteractedBefore, markUserAsVisited } from '../database/sessions.db';
 import { getAIResponse } from '../services/ai/aiOrchestrator';
 import { normalizeForVoice } from '../adapters/MaxAdapter';
+import { EverydayToolsService } from '../services/tools/EverydayToolsService';
+import { getRegistryHelpText } from '../services/CapabilityRegistry';
 
 export async function handleIncomingMessage(
   chatId: string,
@@ -14,6 +16,34 @@ export async function handleIncomingMessage(
   callLLM: (messages: any[]) => Promise<string>
 ): Promise<void> {
   const lower = userText.toLowerCase().trim();
+
+  // 1. Этический щит безопасности (Запрет криминала, терроризма, оружия, наркотиков и 18+)
+  const dangerousPatterns = [
+    /\b(?:оружи[еяюем]|взрывчатк\w*|бомб[ауеы]|детонатор\w*|теракт\w*|террориз\w*)\b/i,
+    /\b(?:наркотик\w*|мефедрон\w*|героин\w*|кокаин\w*|синтез\s+наркотик\w*)\b/i,
+    /\b(?:порно\w*|секс\s+услуг\w*|проститут\w*|интим\s+досуг)\b/i,
+    /\b(?:взлом\s+банка|изготовлени[ея]\s+оружия|суицид\w*|самоубийств\w*)\b/i
+  ];
+
+  if (dangerousPatterns.some(pattern => pattern.test(lower))) {
+    const refusalText = "Я соблюдаю правила безопасности и не обрабатываю запросы, связанные с оружием, незаконной деятельностью, запрещенными веществами и контентом 18+. Если вам нужна помощь с решением бытовых, рабочих, учебных или творческих задач — я с радостью помогу!";
+    if (isVoiceInput) {
+      await synthesizeAndSendVoice(maxBot, chatId, refusalText);
+    } else {
+      await safeSendMessageToChat(maxBot, chatId, refusalText);
+    }
+    return;
+  }
+
+  // 2. Справка и меню возможностей
+  if (['/help', '/menu', 'помощь', 'меню', 'что ты умеешь', 'что умеешь', 'функции'].includes(lower)) {
+    const helpText = getRegistryHelpText();
+    await safeSendMessageToChat(maxBot, chatId, helpText);
+    if (isVoiceInput) {
+      await synthesizeAndSendVoice(maxBot, chatId, "Я умею считать кредиты и налоги, составлять тренировки и меню, рассчитывать стройматериалы, диагностировать авто, писать тексты, помогать в учебе и многое другое. Назовите вашу задачу!");
+    }
+    return;
+  }
   
   // Команды переключения режима
   if (lower.includes('селин 123770') || lower.includes('selin 123770') || lower === '123770' || lower === '/text_mode') {
@@ -45,13 +75,24 @@ export async function handleIncomingMessage(
     return;
   }
 
+  // 3. Мгновенные кастомизированные инструменты для повседневных задач
+  const toolResult = EverydayToolsService.tryProcessEverydayTask(userText);
+  if (toolResult && toolResult.handled) {
+    const currentMode = await getBotUserMode(chatId);
+    if (isVoiceInput && currentMode !== 'text') {
+      await synthesizeAndSendVoice(maxBot, chatId, toolResult.voiceFriendlyText);
+    }
+    await safeSendMessageToChat(maxBot, chatId, toolResult.formattedResponse);
+    return;
+  }
+
   // Проверка на первый визит с использованием async/await sqlite3
   const isFirstVisit = !await hasUserInteractedBefore(chatId);
   if (isFirstVisit) {
-    const WELCOME_VOICE = `Привет! Я Selin AI. Я слышу тебя и отвечу голосом. Просто скажи, что тебе нужно, или задай вопрос. Я здесь, чтобы помочь.`;
+    const WELCOME_VOICE = `Привет! Я Selin AI. Я твой персональный универсальный ассистент. Я умею решать любые повседневные задачи: от финансов, здоровья и кулинарии до ремонта, учебы и текстов. Просто скажи, что нужно сделать!`;
     await synthesizeAndSendVoice(maxBot, chatId, WELCOME_VOICE);
     await markUserAsVisited(chatId);
-    return; // После этого сразу выходим, ничего больше не пишем.
+    return;
   }
 
   // Определение формата ответа
@@ -59,19 +100,25 @@ export async function handleIncomingMessage(
   const isCodeRequest = lower.startsWith('/code') || lower.startsWith('напиши код') || currentMode === 'text';
   const shouldReplyWithText = isCodeRequest; 
 
-  const SYSTEM_PROMPT = `Ты говоришь на грамотном литературном русском языке, как учитель русского языка и литературы. Без markdown, без звёздочек, без решёток, без таблиц, без символов-разделителей. Обычный связный текст с абзацами и правильной пунктуацией. Тон доброжелательный, точный, богатый.
+  const SYSTEM_PROMPT = `Ты — Selin AI, универсальный супер-ассистент экспертного уровня для любых жизненных и профессиональных задач.
+Твои знания охватывают все повседневные сферы:
+- Финансы и расчеты: кредиты, инвестиции, бюджет, налоги, конвертация валют.
+- Здоровье и фитнес (ЗОЖ): расчет калорий, БЖУ, ИМТ, водный баланс, фазы сна, программы тренировок.
+- Кулинария: рецепты из любых продуктов, таймеры приготовления, замены ингредиентов.
+- Дом, ремонт и авто: расчет плитки, обоев, ламината, расшифровка кодов ошибок OBD-II (Check Engine), выведение пятен.
+- Учеба и наука: решение задач, простое объяснение сложных тем (метод Фейнмана), мнемоники, конвертация единиц.
+- Работа и документы: шаблоны заявлений, расписок, договоров, матрица Эйзенхауэра, цели SMART.
+- Творчество и SMM: посты для соцсетей, сценарии видео, поздравления, промпты для нейросетей.
+- Путешествия: маршруты по дням, сборы чемодана, часовые пояса.
 
-Ты голосовой ассистент Selin AI.
+ПРАВИЛА И ЭТИКА:
+- Категорически запрещены: оружие, взрывчатка, терроризм, наркотики, криминал и контент 18+.
+- Говори на грамотном литературном русском языке, по-деловому, доброжелательно и по существу.
 
-На просьбы «озвучь», «расскажи», «прочитай» любую книгу, главу, длинный текст — выполняй без отказов. Длинные тексты читай частями. Никогда не говори «я ограничен» или «у меня нет такой возможности».
-
-Правила голосовых ответов. Длину выбирай сам: если вопрос короткий и простой — отвечай одним-двумя предложениями; если просят объяснить, рассказать или разобрать — связный ответ из 4-8 предложений. Никогда не начинай с междометий "ой", "ах", "ох", "ну", "вот". Говори как профессиональный диктор: спокойно, точно, литературным русским языком.
-
-СТРОГИЕ ПРАВИЛА ДЛЯ ОЗВУЧКИ:
-- НИКОГДА не используй Markdown (никаких звездочек, решеток, тире для списков, обратных кавычек).
-- НИКОГДА не используй смайлики и эмодзи.
-- Не используй нумерованные списки (1., 2., 3.). Если нужно перечислить, используй слова 'во-первых', 'во-вторых'.
-- Пиши только сплошным текстом, используя обычные знаки препинания (точки, запятые, вопросительные знаки), чтобы синтезатор речи (TTS) делал правильные паузы.`;
+СТРОГИЕ ПРАВИЛА ДЛЯ ГОЛОСОВЫХ ОТВЕТОВ:
+- Если ответ предназначен для озвучки, пиши живым связным текстом без Markdown (без звездочек, решеток, таблиц), без эмодзи.
+- Вместо списков 1, 2, 3 используй вводные слова «во-первых», «во-вторых», «также».
+- Длину выбирай сам: на простой вопрос отвечай 1-3 предложениями, на сложный — четко по пунктам без воды.`;
 
   // Вызов LLM через AI Orchestrator
   const llmResponse = await getAIResponse(userText, SYSTEM_PROMPT);
@@ -91,3 +138,4 @@ export async function handleIncomingMessage(
     }
   }
 }
+

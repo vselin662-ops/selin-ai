@@ -323,6 +323,25 @@ export class SelinCore {
       logger.error('Error handling greeting/duplicate logic:', e);
     }
 
+    // 0.1. Проверка на быстрые прикладные расчеты и повседневные инструменты
+    try {
+      const { EverydayToolsService } = await import("../services/tools/EverydayToolsService");
+      const toolResult = EverydayToolsService.tryProcessEverydayTask(effectiveText);
+      if (toolResult && toolResult.handled) {
+        const isVoiceResponse = context.isVoice ||
+          context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+          context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+        return {
+          text: isVoiceResponse ? toolResult.voiceFriendlyText : toolResult.formattedResponse,
+          confidence: 1.0,
+          voice: isVoiceResponse ? { format: 'ogg' } : undefined
+        };
+      }
+    } catch (toolErr) {
+      logger.error('Error executing Everyday Tools:', toolErr);
+    }
+
     // 0. Проверка на запрос к Рою Специалистов
     try {
       const swarmResponse = await tryExecuteSwarm(effectiveText, context);
