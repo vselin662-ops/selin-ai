@@ -399,9 +399,13 @@ export class MaxAdapter {
         try {
           return await this.bot.api.sendMessageToUser(numericId, undefined as any, extra);
         } catch (err: unknown) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          logger.error("❌ [MaxAdapter] Max send failed in sendToUser", { userId: numericId, message: errorMsg });
-          return null;
+          try {
+            return await this.bot.api.sendMessageToChat(numericId, undefined as any, extra);
+          } catch (chatErr: unknown) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            logger.error("❌ [MaxAdapter] Max send failed in sendToUser & sendToChat", { userId: numericId, message: errorMsg });
+            return null;
+          }
         }
       }
       return null;
@@ -420,12 +424,16 @@ export class MaxAdapter {
         try {
           lastMsg = await this.bot.api.sendMessageToUser(numericId, chunk as any, currentExtra);
         } catch (err: unknown) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          logger.error("❌ [MaxAdapter] Max send failed in sendToUser", {
-            userId: numericId,
-            message: errorMsg,
-            chunkIndex: i
-          });
+          try {
+            lastMsg = await this.bot.api.sendMessageToChat(numericId, chunk as any, currentExtra);
+          } catch (chatErr: unknown) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            logger.error("❌ [MaxAdapter] Max send failed in sendToUser & sendToChat", {
+              userId: numericId,
+              message: errorMsg,
+              chunkIndex: i
+            });
+          }
         }
         if (i < chunks.length - 1) {
           await new Promise(r => setTimeout(r, 600));
@@ -440,18 +448,32 @@ export class MaxAdapter {
       return message;
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error("❌ [MaxAdapter] Max send failed in sendToUser", {
-        userId: numericId,
-        message: errorMsg
-      });
+      logger.warn(`⚠️ [MaxAdapter] sendMessageToUser failed for ${numericId} (${errorMsg}), trying sendMessageToChat...`);
 
-      // Fallback: попытаться отправить обычный текст если была отправка с вложениями
-      if (extra && trimmedText) {
-        try {
-          return await this.bot.api.sendMessageToUser(numericId, trimmedText);
-        } catch (fallbackErr: unknown) {
-          const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          logger.error(`❌ [MaxAdapter] Fallback plain-text send failed: ${fbMsg}`);
+      try {
+        const chatMsg = await this.bot.api.sendMessageToChat(numericId, trimmedText as any, extra);
+        logger.info(`✅ [MaxAdapter] Message successfully sent to Max chat ${numericId}`);
+        return chatMsg;
+      } catch (chatErr: unknown) {
+        const chatErrMsg = chatErr instanceof Error ? chatErr.message : String(chatErr);
+        logger.error("❌ [MaxAdapter] Max send failed in both sendToUser and sendToChat", {
+          id: numericId,
+          userError: errorMsg,
+          chatError: chatErrMsg
+        });
+
+        // Fallback: попытаться отправить обычный текст если была отправка с вложениями
+        if (extra && trimmedText) {
+          try {
+            return await this.bot.api.sendMessageToUser(numericId, trimmedText);
+          } catch {
+            try {
+              return await this.bot.api.sendMessageToChat(numericId, trimmedText);
+            } catch (fallbackErr: unknown) {
+              const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+              logger.error(`❌ [MaxAdapter] Fallback plain-text send failed: ${fbMsg}`);
+            }
+          }
         }
       }
 
@@ -478,13 +500,21 @@ export class MaxAdapter {
     try {
       const mp3Buffer = await ensureMp3Buffer(audioBuffer);
       const maxToken = this.token || process.env.MAX_BOT_TOKEN;
-      const initRes = await fetch('https://platform-api.max.ru/uploads?type=audio', {
+      let initRes = await fetch('https://platform-api2.max.ru/uploads?type=audio', {
         method: 'POST',
         headers: { 'Authorization': maxToken || '' },
         signal: AbortSignal.timeout(15000)
-      });
+      }).catch(() => null);
 
-      if (initRes.ok) {
+      if (!initRes || !initRes.ok) {
+        initRes = await fetch('https://platform-api.max.ru/uploads?type=audio', {
+          method: 'POST',
+          headers: { 'Authorization': maxToken || '' },
+          signal: AbortSignal.timeout(15000)
+        }).catch(() => null);
+      }
+
+      if (initRes && initRes.ok) {
         const initData: any = await initRes.json();
         const uploadToken = initData?.token;
         const uploadUrl = initData?.url;
@@ -502,7 +532,7 @@ export class MaxAdapter {
 
           if (uploadRes.ok) {
             await new Promise(resolve => setTimeout(resolve, 1500));
-            await this.bot.api.sendMessageToUser(numericId, '', {
+            const voicePayload = {
               attachments: [{
                 type: 'audio',
                 payload: {
@@ -510,15 +540,24 @@ export class MaxAdapter {
                   filename: 'voice.mp3'
                 }
               }] as any
-            });
-            logger.info(`🎤 [MaxAdapter] Voice message chunk successfully sent to user ${numericId}`);
+            };
+            try {
+              await this.bot.api.sendMessageToUser(numericId, '', voicePayload);
+            } catch {
+              try {
+                await this.bot.api.sendMessageToChat(numericId, '', voicePayload);
+              } catch (chatSendErr) {
+                logger.warn(`⚠️ [MaxAdapter] Failed to send voice via chat API: ${chatSendErr}`);
+              }
+            }
+            logger.info(`🎤 [MaxAdapter] Voice message chunk successfully sent to user/chat ${numericId}`);
             return true;
           } else {
             logger.warn(`⚠️ [MaxAdapter] Upload to MAX storage failed with status ${uploadRes.status}`);
           }
         }
       } else {
-        logger.warn(`⚠️ [MaxAdapter] Failed to init MAX storage upload: ${initRes.status}`);
+        logger.warn(`⚠️ [MaxAdapter] Failed to init MAX storage upload: ${initRes?.status}`);
       }
     } catch (err: any) {
       logger.error(`❌ [MaxAdapter] sendSingleAudioBuffer error: ${err.message || err}`);
@@ -533,13 +572,21 @@ export class MaxAdapter {
     if (!imageBuffer || imageBuffer.length === 0 || !this.bot) return null;
     try {
       const maxToken = this.token || process.env.MAX_BOT_TOKEN;
-      const initRes = await fetch('https://platform-api.max.ru/uploads?type=image', {
+      let initRes = await fetch('https://platform-api2.max.ru/uploads?type=image', {
         method: 'POST',
         headers: { 'Authorization': maxToken || '' },
         signal: AbortSignal.timeout(15000)
-      });
+      }).catch(() => null);
 
-      if (initRes.ok) {
+      if (!initRes || !initRes.ok) {
+        initRes = await fetch('https://platform-api.max.ru/uploads?type=image', {
+          method: 'POST',
+          headers: { 'Authorization': maxToken || '' },
+          signal: AbortSignal.timeout(15000)
+        }).catch(() => null);
+      }
+
+      if (initRes && initRes.ok) {
         const initData: any = await initRes.json();
         const uploadToken = initData?.token;
         const uploadUrl = initData?.url;
@@ -636,14 +683,23 @@ export class MaxAdapter {
         }
 
         if (activeToken) {
-          await this.bot.api.sendMessageToUser(numericId, caption, {
+          const imgExtra = {
             attachments: [{
               type: 'image',
               payload: {
                 token: activeToken
               }
             }] as any
-          });
+          };
+          try {
+            await this.bot.api.sendMessageToUser(numericId, caption, imgExtra);
+          } catch {
+            try {
+              await this.bot.api.sendMessageToChat(numericId, caption, imgExtra);
+            } catch (chatSendErr) {
+              logger.warn(`⚠️ [MaxAdapter] Failed to send cached image to chat: ${chatSendErr}`);
+            }
+          }
           if (isVoiceInput) {
             await this.synthesizeAndSendVoice(cleanId, caption);
           }
@@ -724,14 +780,23 @@ export class MaxAdapter {
 
         if (this.bot && !isNaN(numericId) && numericId > 0) {
           if (uploadToken) {
-            await this.bot.api.sendMessageToUser(numericId, caption, {
+            const imgExtra = {
               attachments: [{
                 type: 'image',
                 payload: {
                   token: uploadToken
                 }
               }] as any
-            });
+            };
+            try {
+              await this.bot.api.sendMessageToUser(numericId, caption, imgExtra);
+            } catch {
+              try {
+                await this.bot.api.sendMessageToChat(numericId, caption, imgExtra);
+              } catch (chatSendErr) {
+                logger.warn(`⚠️ [MaxAdapter] Failed to send image to chat: ${chatSendErr}`);
+              }
+            }
             if (isVoiceInput) {
               await this.synthesizeAndSendVoice(cleanId, caption);
             }

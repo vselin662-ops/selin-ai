@@ -32,6 +32,8 @@ import { TelegramAdapter } from "./src/adapters/TelegramAdapter";
 import { agentOrchestrator } from "./src/core/AgentOrchestrator";
 import { checkRequiredEnvVars } from "./src/config/env";
 import { initSessionsDb, closeDatabase } from "./src/index";
+import "./src/auto-max-poller";
+import { setPollerWebhookHandler } from "./src/auto-max-poller";
 
 // Import Modular Routers
 import languageRouter from "./src/routes/language.routes";
@@ -144,8 +146,17 @@ export const selinCore = new SelinCore(selinLLMService);
 export const modernMaxAdapter = new ModernMaxAdapter(selinCore, process.env.MAX_BOT_TOKEN);
 modernMaxAdapter.connect().catch((err) => logger.error("Failed to connect modernMaxAdapter", { error: err }));
 
-// Start background Long Polling for MAX Messenger updates
-import("./src/auto-max-poller").catch((err) => logger.error("Failed to load auto-max-poller", { error: err }));
+// Connect Long Polling handler directly to modernMaxAdapter
+setPollerWebhookHandler(async (updateBody) => {
+  const mockReq = { body: updateBody };
+  const mockRes = {
+    headersSent: false,
+    status: () => mockRes,
+    send: () => {},
+    json: () => {}
+  };
+  await modernMaxAdapter.handleWebhook(mockReq, mockRes);
+});
 
 export const telegramAdapter = new TelegramAdapter(agentOrchestrator);
 telegramAdapter.registerWebhook().catch((err) => logger.error("Failed to register Telegram webhook", { error: err }));

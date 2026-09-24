@@ -29,6 +29,7 @@ import { ConciergeAgent } from './agents/concierge.agent';
 
 import { logger } from './logger';
 import './auto-max-poller';
+import { setPollerWebhookHandler } from './auto-max-poller';
 
 dotenv.config();
 
@@ -79,6 +80,16 @@ export function createServerApp(): ServerServices {
   // Адаптер MAX Messenger
   const maxAdapter = new MaxAdapter(selinCore, process.env.MAX_BOT_TOKEN);
   maxAdapter.connect().catch((err) => logger.error('Failed to connect maxAdapter in src/server.ts', { error: err }));
+  setPollerWebhookHandler(async (updateBody) => {
+    const mockReq = { body: updateBody };
+    const mockRes = {
+      headersSent: false,
+      status: () => mockRes,
+      send: () => {},
+      json: () => {}
+    };
+    await maxAdapter.handleWebhook(mockReq, mockRes);
+  });
 
   // Адаптер Telegram
   const telegramAdapter = new TelegramAdapter(selinOrchestrator);
