@@ -144,6 +144,9 @@ export const selinCore = new SelinCore(selinLLMService);
 export const modernMaxAdapter = new ModernMaxAdapter(selinCore, process.env.MAX_BOT_TOKEN);
 modernMaxAdapter.connect().catch((err) => logger.error("Failed to connect modernMaxAdapter", { error: err }));
 
+// Start background Long Polling for MAX Messenger updates
+import("./src/auto-max-poller").catch((err) => logger.error("Failed to load auto-max-poller", { error: err }));
+
 export const telegramAdapter = new TelegramAdapter(agentOrchestrator);
 telegramAdapter.registerWebhook().catch((err) => logger.error("Failed to register Telegram webhook", { error: err }));
 

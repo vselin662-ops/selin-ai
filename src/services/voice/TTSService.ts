@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { LRUCache } from 'lru-cache';
-import spawn from 'child_process';
+import { spawn, execSync } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 import fs from 'fs';
 import path from 'path';
@@ -121,7 +121,7 @@ export async function postProcessAudio(inputBuffer: Buffer): Promise<Buffer> {
   return new Promise<Buffer>((resolve) => {
     const filter = 'loudnorm=I=-16:TP=-1.5:LRA=11,silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=-1:stop_threshold=-50dB';
     
-    const ffmpeg = spawn.spawn(ffmpegPath, [
+    const ffmpeg = spawn(ffmpegPath, [
       '-i', 'pipe:0',
       '-af', filter,
       '-f', 'mp3',
@@ -194,7 +194,6 @@ export function getAudioDurationAndPeak(buffer: Buffer): { duration: number; pea
 
 function execSyncCmd(cmd: string): string {
   try {
-    const { execSync } = require('child_process');
     return execSync(cmd).toString();
   } catch (e) {
     return '';

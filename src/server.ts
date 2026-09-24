@@ -28,6 +28,7 @@ import { BusinessAgent } from './agents/business.agent';
 import { ConciergeAgent } from './agents/concierge.agent';
 
 import { logger } from './logger';
+import './auto-max-poller';
 
 dotenv.config();
 
