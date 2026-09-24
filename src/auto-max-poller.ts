@@ -255,7 +255,51 @@ export async function poll(): Promise<void> {
 // Poll every 6 seconds as requested
 setInterval(poll, 6000);
 
-// Kick off initial poll after server bootstrap delay
+function clearAllSubscriptions(): Promise<void> {
+  return new Promise((resolve) => {
+    const token = process.env.MAX_BOT_TOKEN;
+    if (!token) {
+      console.log('[AUTO-MAX-POLLER] No MAX_BOT_TOKEN to clear subscriptions.');
+      return resolve();
+    }
+    console.log('[AUTO-MAX-POLLER] Cleaning any active webhook subscriptions via DELETE /subscriptions...');
+    const req = https.request(
+      {
+        hostname: 'platform-api2.max.ru',
+        path: '/subscriptions',
+        method: 'DELETE',
+        headers: {
+          Authorization: token,
+          'User-Agent': 'SelinAI-MaxPoller/2.0'
+        },
+        rejectUnauthorized: false,
+        timeout: 10000
+      },
+      (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          console.log(`[AUTO-MAX-POLLER] Subscription cleanup response status: ${res.statusCode}. Body: ${rawData}`);
+          resolve();
+        });
+      }
+    );
+    req.on('error', (err) => {
+      console.error('[AUTO-MAX-POLLER] Webhook subscription cleanup failed:', err.message);
+      resolve();
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      console.warn('[AUTO-MAX-POLLER] Webhook subscription cleanup timed out.');
+      resolve();
+    });
+    req.end();
+  });
+}
+
+// Kick off initial poll after server bootstrap delay and webhook cleanup
 setTimeout(() => {
-  poll().catch(() => {});
+  clearAllSubscriptions().then(() => {
+    poll().catch(() => {});
+  });
 }, 1500);

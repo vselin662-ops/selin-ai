@@ -2302,6 +2302,22 @@ export class MaxAdapter {
       }
 
       // === ШАГ 3: ПРОВЕРКА ДОСТУПА (Владелец / Активная подписка / Locked) ===
+      const secretActivationWord = "гость2026";
+      if (lowerText === secretActivationWord) {
+        const { activateSubscription } = await import("../fintech/subscriptions");
+        activateSubscription(cleanId, 'plan', 30);
+        const successMsg = '🔓 Поздравляю! Секретное кодовое слово принято. Вам активирован бесплатный доступ на 30 дней!';
+        await this.safeSendMessageToChat(cleanId, successMsg);
+        
+        // Уведомление владельцу
+        const ownerChatId = String(process.env.OWNER_CHAT_ID || '').trim();
+        if (ownerChatId && cleanId !== ownerChatId) {
+          const senderName = raw.user?.name || raw.sender?.name || raw.message?.sender?.name || raw.payload?.user?.name || cleanId;
+          await this.safeSendMessageToChat(ownerChatId, `🔑 Пользователь ${senderName} (ID: ${cleanId}) активировал гостевой доступ по кодовому слову!`);
+        }
+        return res.status(200).send('ok');
+      }
+
       const { checkAccess } = await import("../fintech/subscriptions");
       const hasAccess = checkAccess(cleanId);
 
