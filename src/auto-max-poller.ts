@@ -1,10 +1,61 @@
 import https from 'https';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 
 console.log('⚡ [AUTO-MAX-POLLER] Module Loaded & Initializing...');
 
 export type PollerUpdateHandler = (update: any) => Promise<void>;
+
+/**
+ * Robust helper to send JSON payloads to internal/external webhook endpoints.
+ * Disables certificate checks (rejectUnauthorized: false) for secure compatibility.
+ */
+function forwardToWebhook(urlStr: string, payload: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlStr);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      const req = client.request(
+        {
+          hostname: url.hostname,
+          port: url.port || (isHttps ? 443 : 80),
+          path: url.pathname + url.search,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload)
+          },
+          rejectUnauthorized: false,
+          timeout: 5000
+        },
+        (res) => {
+          res.resume();
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Status Code: ${res.statusCode}`));
+          }
+        }
+      );
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Timeout'));
+      });
+
+      req.write(payload);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 let pollerHandler: PollerUpdateHandler | null = null;
 
@@ -101,7 +152,8 @@ export async function poll(): Promise<void> {
           Authorization: token,
           'User-Agent': 'SelinAI-MaxPoller/2.0'
         },
-        timeout: 10000
+        timeout: 10000,
+        rejectUnauthorized: false
       },
       (res) => {
         let rawData = '';
@@ -165,17 +217,9 @@ export async function poll(): Promise<void> {
                 const port = process.env.PORT || 3000;
                 const forwardPayload = JSON.stringify(update);
 
-                fetch(`http://127.0.0.1:${port}/api/max/webhook`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: forwardPayload
-                }).catch(() => {
+                forwardToWebhook(`http://127.0.0.1:${port}/api/max/webhook`, forwardPayload).catch(() => {
                   // Fallback to localhost if 127.0.0.1 fails
-                  fetch(`http://localhost:${port}/api/max/webhook`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: forwardPayload
-                  }).catch((forwardErr) => {
+                  forwardToWebhook(`http://localhost:${port}/api/max/webhook`, forwardPayload).catch((forwardErr) => {
                     console.error('[AUTO-MAX-POLLER] Forward error:', forwardErr);
                   });
                 });
