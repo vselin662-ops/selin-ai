@@ -501,6 +501,7 @@ export class MaxAdapter {
     try {
       const mp3Buffer = await ensureMp3Buffer(audioBuffer);
       const maxToken = this.token || process.env.MAX_BOT_TOKEN;
+      
       let initRes = await fetch('https://platform-api2.max.ru/uploads?type=audio', {
         method: 'POST',
         headers: { 'Authorization': maxToken || '' },
@@ -516,14 +517,15 @@ export class MaxAdapter {
       }
 
       if (initRes && initRes.ok) {
-        const initData: any = await initRes.json();
-        const uploadToken = initData?.token;
-        const uploadUrl = initData?.url;
+        const initData: any = await initRes.json().catch(() => null);
+        const uploadToken = initData?.token || initData?.upload_token;
+        const uploadUrl = initData?.url || initData?.upload_url;
 
-        if (uploadToken && uploadUrl) {
+        if (uploadUrl) {
           const form = new FormData();
           const fileBlob = new Blob([mp3Buffer], { type: 'audio/mpeg' });
           form.append('data', fileBlob, 'voice.mp3');
+          form.append('file', fileBlob, 'voice.mp3');
 
           const uploadRes = await fetch(uploadUrl, {
             method: 'POST',
@@ -532,27 +534,49 @@ export class MaxAdapter {
           });
 
           if (uploadRes.ok) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            const voicePayload = {
-              attachments: [{
-                type: 'audio',
-                payload: {
-                  token: uploadToken,
-                  filename: 'voice.mp3'
-                }
-              }] as any
-            };
-            try {
-              await this.bot.api.sendMessageToUser(numericId, '', voicePayload);
-            } catch {
+            const uploadJson: any = await uploadRes.json().catch(() => null);
+            const finalToken = uploadJson?.token || uploadJson?.upload_token || uploadJson?.id || uploadToken;
+
+            if (finalToken) {
+              await new Promise(resolve => setTimeout(resolve, 800));
+              const voicePayload = {
+                attachments: [{
+                  type: 'audio',
+                  payload: {
+                    token: finalToken,
+                    filename: 'voice.mp3'
+                  }
+                }] as any
+              };
+
+              let sent = false;
               try {
-                await this.bot.api.sendMessageToChat(numericId, '', voicePayload);
-              } catch (chatSendErr) {
-                logger.warn(`⚠️ [MaxAdapter] Failed to send voice via chat API: ${chatSendErr}`);
+                await this.bot.api.sendMessageToUser(numericId, undefined as any, voicePayload);
+                sent = true;
+              } catch {
+                try {
+                  await this.bot.api.sendMessageToChat(numericId, undefined as any, voicePayload);
+                  sent = true;
+                } catch {
+                  try {
+                    await this.bot.api.sendMessageToUser(numericId, '', voicePayload);
+                    sent = true;
+                  } catch {
+                    try {
+                      await this.bot.api.sendMessageToChat(numericId, '', voicePayload);
+                      sent = true;
+                    } catch (chatSendErr) {
+                      logger.warn(`⚠️ [MaxAdapter] Failed to send voice via chat API: ${chatSendErr}`);
+                    }
+                  }
+                }
+              }
+
+              if (sent) {
+                logger.info(`🎤 [MaxAdapter] Voice message chunk successfully sent to user/chat ${numericId}`);
+                return true;
               }
             }
-            logger.info(`🎤 [MaxAdapter] Voice message chunk successfully sent to user/chat ${numericId}`);
-            return true;
           } else {
             logger.warn(`⚠️ [MaxAdapter] Upload to MAX storage failed with status ${uploadRes.status}`);
           }
