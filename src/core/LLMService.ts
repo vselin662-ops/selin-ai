@@ -11,8 +11,8 @@ import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || 'gemini';
-const PRIMARY_MODEL = process.env.PRIMARY_MODEL || 'gemini-3.8-flash';
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || 'gemini';
+const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'gemini-3.8-flash';
 
 const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];
 const LITE_GEMINI_MODELS = ['gemini-3.5-flash-lite'];
@@ -421,6 +421,9 @@ export function markFail(provider: string, error?: any) {
 }
 
 export function isProviderConfigured(provider: string): boolean {
+  if (provider === 'ollama') {
+    return !!process.env.OLLAMA_BASE_URL;
+  }
   let key: string | undefined;
   if (provider === 'groq') key = process.env.GROQ_API_KEY;
   else if (provider === 'openrouter') key = process.env.OPENROUTER_API_KEY;
@@ -430,7 +433,7 @@ export function isProviderConfigured(provider: string): boolean {
 }
 
 export async function runCanaryCheck() {
-  const testProviders = ['groq', 'openrouter', 'gemini', 'teamo'];
+  const testProviders = ['ollama', 'groq', 'openrouter', 'gemini', 'teamo'];
   for (const provName of testProviders) {
     if (!isProviderConfigured(provName)) {
       continue;
@@ -997,13 +1000,21 @@ ${identityBlock}
     let responseText: string | null = null;
     let successfulProvider: string | null = null;
 
-    // Ordered list of providers: groq -> openrouter -> gemini -> teamo
+    // Ordered list of providers: ollama -> groq -> openrouter -> gemini -> teamo
     const allProviders = [
+      { name: 'ollama', call: () => this.callOllama(messages) },
       { name: 'groq', call: () => this.callGroq(messages) },
       { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
       { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
       { name: 'teamo', call: () => this.callTeamo(messages) }
     ];
+
+    // Sort providers: preferred PRIMARY_PROVIDER goes first
+    allProviders.sort((a, b) => {
+      if (a.name === PRIMARY_PROVIDER) return -1;
+      if (b.name === PRIMARY_PROVIDER) return 1;
+      return 0;
+    });
 
     const providersToTry = allProviders.filter(prov => isProviderConfigured(prov.name));
 
@@ -1554,6 +1565,43 @@ ${identityBlock}
       }
     }
     throw (lastError || new Error("Empty response from Gemini"));
+  }
+
+  private async callOllama(messages: any[]): Promise<string> {
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+    const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
+    const url = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+
+    const formattedMessages = messages.map(msg => ({
+      role: msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user'),
+      content: msg.content
+    }));
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: formattedMessages,
+          temperature: 0.7,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama HTTP Error ${response.status}`);
+      }
+      const data: any = await response.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (!text) {
+        throw new Error("Empty response from Ollama");
+      }
+      return sanitize(text);
+    } catch (err: any) {
+      throw new Error(`Ollama call failed: ${err?.message || err}`);
+    }
   }
 }
 
