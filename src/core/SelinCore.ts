@@ -323,23 +323,27 @@ export class SelinCore {
       logger.error('Error handling greeting/duplicate logic:', e);
     }
 
-    // 0.1. Проверка на быстрые прикладные расчеты и повседневные инструменты
+    // 0.1. Суверенный Когнитивный Оркестратор (ReAct & Tool Registry)
     try {
-      const { EverydayToolsService } = await import("../services/tools/EverydayToolsService");
-      const toolResult = EverydayToolsService.tryProcessEverydayTask(effectiveText);
-      if (toolResult && toolResult.handled) {
+      const { CognitiveOrchestrator } = await import("./orchestrator/CognitiveOrchestrator");
+      const cogResult = await CognitiveOrchestrator.process(effectiveText, {
+        chatId: context.chatId,
+        isVoice: context.isVoice
+      });
+
+      if (cogResult && cogResult.status !== 'FALLBACK') {
         const isVoiceResponse = context.isVoice ||
           context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
           context.voiceMode === VoiceMode.VOICE_TO_VOICE;
 
         return {
-          text: isVoiceResponse ? toolResult.voiceFriendlyText : toolResult.formattedResponse,
+          text: isVoiceResponse ? cogResult.voiceText : cogResult.text,
           confidence: 1.0,
           voice: isVoiceResponse ? { format: 'ogg' } : undefined
         };
       }
-    } catch (toolErr) {
-      logger.error('Error executing Everyday Tools:', toolErr);
+    } catch (cogErr) {
+      logger.error('Error executing Cognitive Orchestrator:', cogErr);
     }
 
     // 0. Проверка на запрос к Рою Специалистов

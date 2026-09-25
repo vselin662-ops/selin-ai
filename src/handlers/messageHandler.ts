@@ -1,7 +1,6 @@
 import { hasUserInteractedBefore, markUserAsVisited } from '../database/sessions.db';
 import { getAIResponse } from '../services/ai/aiOrchestrator';
 import { normalizeForVoice } from '../adapters/MaxAdapter';
-import { EverydayToolsService } from '../services/tools/EverydayToolsService';
 import { getRegistryHelpText } from '../services/CapabilityRegistry';
 
 export async function handleIncomingMessage(
@@ -75,14 +74,15 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // 3. Мгновенные кастомизированные инструменты для повседневных задач
-  const toolResult = EverydayToolsService.tryProcessEverydayTask(userText);
-  if (toolResult && toolResult.handled) {
+  // 3. Суверенный Когнитивный Оркестратор (Туннели действий)
+  const { CognitiveOrchestrator } = await import('../core/orchestrator/CognitiveOrchestrator');
+  const cogResult = await CognitiveOrchestrator.process(userText, { chatId, isVoice: isVoiceInput });
+  if (cogResult && cogResult.status !== 'FALLBACK') {
     const currentMode = await getBotUserMode(chatId);
     if (isVoiceInput && currentMode !== 'text') {
-      await synthesizeAndSendVoice(maxBot, chatId, toolResult.voiceFriendlyText);
+      await synthesizeAndSendVoice(maxBot, chatId, cogResult.voiceText);
     }
-    await safeSendMessageToChat(maxBot, chatId, toolResult.formattedResponse);
+    await safeSendMessageToChat(maxBot, chatId, cogResult.text);
     return;
   }
 
