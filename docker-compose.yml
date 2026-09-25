@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   selin-ai:
     build:
@@ -17,6 +15,7 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://redis:6379
+      - WHISPER_BASE_URL=http://whisper:9000
     volumes:
       - ./data:/app/data
 
@@ -30,5 +29,18 @@ services:
     ports:
       - "6379:6379"
 
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: selin-ai-whisper
+    restart: always
+    environment:
+      - WHISPER_MODEL=small
+      - WHISPER_LANGUAGE=ru
+    ports:
+      - "9000:9000"
+    volumes:
+      - whisper_cache:/root/.cache
+
 volumes:
   redis_data:
+  whisper_cache:

@@ -426,30 +426,26 @@ export function markFail(provider: string, error?: any) {
 
 export function isProviderConfigured(provider: string): boolean {
   if (provider === 'ollama') {
-    return true; // Always attempt Ollama as local/host engine
+    return true; // 100% суверенное локальное ядро на ВМ
   }
-  let key: string | undefined;
-  if (provider === 'groq') key = process.env.GROQ_API_KEY;
-  else if (provider === 'openrouter') key = process.env.OPENROUTER_API_KEY;
-  else if (provider === 'gemini') key = process.env.GEMINI_API_KEY;
-  else if (provider === 'teamo') key = process.env.TEAMO_API_KEY;
-  return !!(key && !key.includes('your_') && !key.includes('placeholder') && key.length > 10);
+  if (provider === 'cloudru') {
+    return !!process.env.CLOUDRU_API_KEY; // Резервный шлюз Cloud.ru (приветственный грант)
+  }
+  return false; // Зарубежные провайдеры отключены в российском контуре
 }
 
 export async function runCanaryCheck() {
-  const testProviders = ['ollama', 'groq', 'openrouter', 'gemini', 'teamo'];
+  const testProviders = ['ollama', 'cloudru'];
   for (const provName of testProviders) {
     if (!isProviderConfigured(provName)) {
       continue;
     }
     try {
       markOk(provName);
-      console.log(`[Canary] provider=${provName} alive`);
       logger.info(`[Canary] provider=${provName} alive`);
     } catch (e: any) {
       markFail(provName, e);
-      console.log(`[Canary] provider=${provName} dead`);
-      logger.warn(`[Canary] provider=${provName} dead`);
+      logger.warn(`[Canary] provider=${provName} notice`);
     }
   }
 }
@@ -1005,13 +1001,10 @@ ${identityBlock}
     let responseText: string | null = null;
     let successfulProvider: string | null = null;
 
-    // Ordered list of providers: ollama -> groq -> openrouter -> gemini -> teamo
+    // Sovereign Russian LLM Chain: Ollama (local on VM) -> Cloud.ru Foundation Models (via Grant)
     const allProviders = [
       { name: 'ollama', call: () => this.callOllama(messages) },
-      { name: 'groq', call: () => this.callGroq(messages) },
-      { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
-      { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
-      { name: 'teamo', call: () => this.callTeamo(messages) }
+      { name: 'cloudru', call: () => this.callCloudRU(messages) }
     ];
 
     // Sort providers: preferred PRIMARY_PROVIDER goes first
@@ -1573,6 +1566,51 @@ ${identityBlock}
     throw (lastError || new Error("Empty response from Gemini"));
   }
 
+  private async callCloudRU(messages: any[]): Promise<string> {
+    const key = process.env.CLOUDRU_API_KEY;
+    if (!key) {
+      throw new Error("CLOUDRU_API_KEY is not configured");
+    }
+
+    const authUrl = process.env.CLOUDRU_BASE_URL || "https://api.cloud.ru/v1/chat/completions";
+    const model = process.env.CLOUDRU_MODEL || "gigachat-pro";
+
+    const formattedMessages = messages.map(msg => ({
+      role: msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user'),
+      content: msg.content
+    }));
+
+    try {
+      const response = await fetch(authUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: formattedMessages,
+          temperature: 0.7
+        }),
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cloud.ru API HTTP ${response.status}`);
+      }
+
+      const data: any = await response.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (!text) {
+        throw new Error("Empty response from Cloud.ru API");
+      }
+      logger.info(`🇷🇺 [Cloud.ru] Responded successfully using model ${model}`);
+      return sanitize(text);
+    } catch (err: any) {
+      throw new Error(`Cloud.ru API failed: ${err?.message || err}`);
+    }
+  }
+
   private async callOllama(messages: any[]): Promise<string> {
     const candidateUrls = [
       process.env.OLLAMA_BASE_URL,
@@ -1583,15 +1621,22 @@ ${identityBlock}
     ].filter(Boolean) as string[];
 
     const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
-    const formattedMessages = messages.map(msg => ({
-      role: msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user'),
-      content: msg.content
-    }));
+    
+    // Оптимизируем длину системного промпта для локальной 3B модели для мгновенного инференса на CPU
+    const formattedMessages = messages.map(msg => {
+      const role = msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user');
+      let content = String(msg.content || '');
+      if (role === 'system' && content.length > 2000) {
+        content = content.substring(0, 2000);
+      }
+      return { role, content };
+    });
 
     let lastError: any = null;
 
     for (const baseUrl of candidateUrls) {
       const cleanBase = baseUrl.replace(/\/$/, '');
+      logger.info(`🦙 [Ollama] Dispatching to ${cleanBase} (model: ${model}, msgs: ${formattedMessages.length})...`);
 
       // 1. Попытка через стандартный OpenAI-совместимый v1/chat/completions
       try {
@@ -1602,9 +1647,10 @@ ${identityBlock}
             model,
             messages: formattedMessages,
             temperature: 0.7,
+            max_tokens: 1000,
             stream: false
           }),
-          signal: AbortSignal.timeout(35000)
+          signal: AbortSignal.timeout(45000)
         });
 
         if (response.ok) {
@@ -1614,9 +1660,12 @@ ${identityBlock}
             logger.info(`🦙 [Ollama:v1] Responded successfully from ${cleanBase} using model ${model}`);
             return sanitize(text);
           }
+        } else {
+          logger.warn(`⚠️ [Ollama:v1] HTTP ${response.status} from ${cleanBase}`);
         }
       } catch (err: any) {
         lastError = err;
+        logger.warn(`⚠️ [Ollama:v1] Probe error on ${cleanBase}: ${err?.message || err}`);
       }
 
       // 2. Попытка через нативный Ollama эндпоинт /api/chat
@@ -1629,7 +1678,7 @@ ${identityBlock}
             messages: formattedMessages,
             stream: false
           }),
-          signal: AbortSignal.timeout(35000)
+          signal: AbortSignal.timeout(45000)
         });
 
         if (response.ok) {
@@ -1639,9 +1688,12 @@ ${identityBlock}
             logger.info(`🦙 [Ollama:native] Responded successfully from ${cleanBase} using model ${model}`);
             return sanitize(text);
           }
+        } else {
+          logger.warn(`⚠️ [Ollama:native] HTTP ${response.status} from ${cleanBase}`);
         }
       } catch (err: any) {
         lastError = err;
+        logger.warn(`⚠️ [Ollama:native] Probe error on ${cleanBase}: ${err?.message || err}`);
       }
     }
 
