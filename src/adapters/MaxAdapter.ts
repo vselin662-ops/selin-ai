@@ -2117,6 +2117,97 @@ export class MaxAdapter {
         return res.status(200).send('ok');
       }
 
+      // === SMART-ПЛАНИРОВЩИК (ЦЕЛИ, ДЕКОМПОЗИЦИЯ, ЗАДАЧИ НА ДЕНЬ) ===
+      if (lowerText.startsWith('цель:') || lowerText.startsWith('/goal ') || lowerText.startsWith('цель ')) {
+        const rawGoal = text.replace(/^(?:цель:?|\/goal)\s*/i, '').trim();
+        if (rawGoal) {
+          const { smartPlannerService } = await import("../services/SmartPlanner");
+          const created = await smartPlannerService.createGoal(cleanId, rawGoal);
+          let reply = `🎯 **SMART-цель зафиксирована**:\n"${rawGoal}"\n\n⏳ Формирую каскадную декомпозицию (Квартал → Неделя → Задачи)...`;
+          await this.safeSendMessageToChat(cleanId, reply);
+
+          if (created) {
+            const decomp = await smartPlannerService.decomposeGoal(created.id, cleanId);
+            if (decomp) {
+              const decompReply = `📋 **План реализации цели**:\n\n${decomp}\n\n✅ Топ-3 задачи автоматически добавлены в ваш план на сегодня.`;
+              if (isVoiceInput) {
+                await this.synthesizeAndSendVoice(cleanId, decompReply);
+              }
+              await this.safeSendMessageToChat(cleanId, decompReply);
+            }
+          }
+          return res.status(200).send('ok');
+        }
+      }
+
+      if (lowerText.startsWith('задача:') || lowerText.startsWith('/task ') || lowerText.startsWith('задача ')) {
+        const rawTask = text.replace(/^(?:задача:?|\/task)\s*/i, '').trim();
+        if (rawTask) {
+          const { smartPlannerService } = await import("../services/SmartPlanner");
+          const task = smartPlannerService.addTask(cleanId, rawTask);
+          const reply = task
+            ? `✅ Задача добавлена на сегодня: **${rawTask}**`
+            : `❌ Не удалось добавить задачу.`;
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, reply);
+          }
+          await this.safeSendMessageToChat(cleanId, reply);
+          return res.status(200).send('ok');
+        }
+      }
+
+      if (lowerText === 'мои цели' || lowerText === 'цели' || lowerText === '/goals') {
+        const { smartPlannerService } = await import("../services/SmartPlanner");
+        const goals = smartPlannerService.getGoals(cleanId, 'active');
+        let reply = '';
+        if (goals.length > 0) {
+          reply = `🎯 **Ваши активные цели**:\n\n` + goals.map((g, idx) => `${idx + 1}. **${g.title}**${g.target_date ? ` (срок: ${g.target_date})` : ''}`).join('\n\n') + '\n\n💡 Чтобы добавить новую цель, напишите: «цель: [описание]»';
+        } else {
+          reply = '🎯 У вас пока нет зафиксированных целей. Напишите: «цель: [описание вашей цели]», и я помогу разложить её на шаги.';
+        }
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, reply);
+        }
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
+      if (lowerText === 'мои задачи' || lowerText === 'задачи' || lowerText === 'задачи на сегодня' || lowerText === '/tasks') {
+        const { smartPlannerService } = await import("../services/SmartPlanner");
+        const tasks = smartPlannerService.getTasksForDate(cleanId);
+        let reply = '';
+        if (tasks.length > 0) {
+          reply = `📋 **Задачи на сегодня**:\n\n` + tasks.map((t) => `${t.is_completed ? '✅' : '▫️'} [#${t.id}] ${t.title}`).join('\n') + '\n\n💡 Чтобы отметить выполненной, напишите: «сделано [номер]»';
+        } else {
+          reply = '📋 Задач на сегодня пока нет. Напишите: «задача: [текст]», чтобы добавить.';
+        }
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, reply);
+        }
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
+      const doneMatch = lowerText.match(/^(?:сделано|выполнено|выполнил|готово|\/done)\s+(\d+)$/i);
+      if (doneMatch) {
+        const taskId = parseInt(doneMatch[1], 10);
+        const { smartPlannerService } = await import("../services/SmartPlanner");
+        const ok = smartPlannerService.toggleTask(taskId, cleanId);
+        const reply = ok ? `✅ Статус задачи #${taskId} успешно изменен!` : `❌ Задача #${taskId} не найдена.`;
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
+      if (lowerText === 'смарт брифинг' || lowerText === 'смарт план' || lowerText === '/smart_briefing' || lowerText === 'план на день') {
+        const { smartPlannerService } = await import("../services/SmartPlanner");
+        const briefing = await smartPlannerService.generateDailyBriefing(cleanId);
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, briefing.formattedText);
+        }
+        await this.safeSendMessageToChat(cleanId, briefing.formattedText);
+        return res.status(200).send('ok');
+      }
+
       // === НАВИГАЦИЯ: ПОВТОР ГОЛОСА МАРШРУТА ===
       if (
         lowerText === 'nav_repeat' ||

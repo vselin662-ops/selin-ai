@@ -45,6 +45,7 @@ import adminRouter from "./src/routes/admin.routes";
 import aiRouter from "./src/routes/ai.routes";
 import mcpRouter from "./src/routes/mcp.routes";
 import legalRouter from "./src/routes/legal.routes";
+import plannerRouter from "./src/routes/planner.routes";
 import { healthRouter } from "./src/routes/health";
 import { adminGuard, adminLoginHandler } from "./src/middleware/adminAuth";
 
@@ -285,6 +286,7 @@ app.use("/api", voiceRouter);
 app.use("/api", adminRouter);
 app.use("/api", aiRouter);
 app.use("/api", mcpRouter);
+app.use("/api/planner", plannerRouter);
 app.use("/api", healthRouter);
 app.use(legalRouter);
 
