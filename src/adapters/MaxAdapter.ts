@@ -2602,8 +2602,8 @@ export class MaxAdapter {
       ) {
         this.setVoiceMode(cleanId, VoiceMode.VOICE_TO_VOICE);
         try {
-          const { setUserPlanConfig } = await import("../services/planning/UserPlanService");
-          setUserPlanConfig(cleanId, { voice_on: 1 });
+          const { updateUserPlanConfig } = await import("../services/ai/ProfileService");
+          updateUserPlanConfig(cleanId, { voice_on: 1 });
         } catch {}
         const reply = "🎙️ Режим голосовых ответов включен! Теперь я буду озвучивать все ответы голосом.";
         await this.synthesizeAndSendVoice(cleanId, reply);
@@ -2620,8 +2620,8 @@ export class MaxAdapter {
       ) {
         this.setVoiceMode(cleanId, VoiceMode.TEXT_TO_TEXT);
         try {
-          const { setUserPlanConfig } = await import("../services/planning/UserPlanService");
-          setUserPlanConfig(cleanId, { voice_on: 0 });
+          const { updateUserPlanConfig } = await import("../services/ai/ProfileService");
+          updateUserPlanConfig(cleanId, { voice_on: 0 });
         } catch {}
         const reply = "📝 Режим только текста активирован. Голосовые ответы отключены.";
         await this.safeSendMessageToChat(cleanId, reply);
@@ -2887,7 +2887,7 @@ export class MaxAdapter {
       let isVoiceDesired = isVoiceInput || this.getVoiceMode(cleanId) === VoiceMode.VOICE_TO_VOICE || this.getVoiceMode(cleanId) === VoiceMode.TEXT_TO_VOICE;
       if (!isVoiceDesired) {
         try {
-          const { getUserPlanConfig } = await import("../services/planning/UserPlanService");
+          const { getUserPlanConfig } = await import("../services/ai/ProfileService");
           const planCfg = getUserPlanConfig(cleanId);
           if (planCfg && planCfg.voice_on === 1) {
             isVoiceDesired = true;
@@ -2896,6 +2896,7 @@ export class MaxAdapter {
       }
 
       if (isVoiceDesired) {
+        logger.info(`🎙️ [MaxAdapter] Voicing reply for chat ${cleanId} (isVoiceInput=${isVoiceInput}, mode=${this.getVoiceMode(cleanId)})`);
         await this.synthesizeAndSendVoice(cleanId, replyText);
       }
       await this.safeSendMessageToChat(cleanId, replyText);

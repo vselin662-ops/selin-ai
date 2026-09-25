@@ -490,7 +490,7 @@ export class ProviderConcurrencyQueue {
 }
 
 export const providerQueue = new ProviderConcurrencyQueue();
-export const FALLBACK_PHRASE = "Я временно потерял нить. Повтори через минуту.";
+export const FALLBACK_PHRASE = "Слушаю вас! Пожалуйста, повторите или уточните ваш вопрос.";
 
 export class LLMService {
   private gemini: GoogleGenAI | null = null;
@@ -706,12 +706,12 @@ export class LLMService {
     const controller = new AbortController();
     const { signal } = controller;
 
-    // Глобальный таймаут на выполнение запроса на 45 секунд
+    // Глобальный таймаут на выполнение запроса на 75 секунд
     const timeoutPromise = new Promise<never>((_, reject) => {
       const timer = setTimeout(() => {
         controller.abort();
         reject(new Error("Timeout"));
-      }, 45000);
+      }, 75000);
       timer.unref();
     });
 
@@ -1022,8 +1022,8 @@ ${identityBlock}
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // Dynamic timeout: 45s for Ollama, 15s for external APIs
-        const provTimeout = prov.name === 'ollama' ? 45000 : 15000;
+        // Dynamic timeout: 60s for Ollama, 15s for external APIs
+        const provTimeout = prov.name === 'ollama' ? 60000 : 15000;
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error(`Timeout ${provTimeout / 1000}s exceeded`)), provTimeout);
         });
@@ -1626,8 +1626,8 @@ ${identityBlock}
     const formattedMessages = messages.map(msg => {
       const role = msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user');
       let content = String(msg.content || '');
-      if (role === 'system' && content.length > 2000) {
-        content = content.substring(0, 2000);
+      if (role === 'system' && content.length > 800) {
+        content = content.substring(0, 800);
       }
       return { role, content };
     });
@@ -1638,7 +1638,7 @@ ${identityBlock}
       const cleanBase = baseUrl.replace(/\/$/, '');
       logger.info(`🦙 [Ollama] Dispatching to ${cleanBase} (model: ${model}, msgs: ${formattedMessages.length})...`);
 
-      // 1. Попытка через стандартный OpenAI-совместимый v1/chat/completions
+      // 1. Попытка через стандартный OpenAI-совместимый v1/chat/completions с оптимизацией скорости
       try {
         const response = await fetch(`${cleanBase}/v1/chat/completions`, {
           method: 'POST',
@@ -1647,10 +1647,10 @@ ${identityBlock}
             model,
             messages: formattedMessages,
             temperature: 0.7,
-            max_tokens: 1000,
+            max_tokens: 300,
             stream: false
           }),
-          signal: AbortSignal.timeout(45000)
+          signal: AbortSignal.timeout(60000)
         });
 
         if (response.ok) {
@@ -1668,7 +1668,7 @@ ${identityBlock}
         logger.warn(`⚠️ [Ollama:v1] Probe error on ${cleanBase}: ${err?.message || err}`);
       }
 
-      // 2. Попытка через нативный Ollama эндпоинт /api/chat
+      // 2. Попытка через нативный Ollama эндпоинт /api/chat с num_predict и keep_alive для максимальной скорости
       try {
         const response = await fetch(`${cleanBase}/api/chat`, {
           method: 'POST',
@@ -1676,9 +1676,15 @@ ${identityBlock}
           body: JSON.stringify({
             model,
             messages: formattedMessages,
-            stream: false
+            stream: false,
+            keep_alive: "24h",
+            options: {
+              num_predict: 300,
+              num_ctx: 1024,
+              temperature: 0.7
+            }
           }),
-          signal: AbortSignal.timeout(45000)
+          signal: AbortSignal.timeout(60000)
         });
 
         if (response.ok) {
