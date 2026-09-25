@@ -1138,61 +1138,17 @@ export class MaxAdapter {
   }
 
   /**
-   * Распознавание речи через Groq Whisper (whisper-large-v3, ru)
+   * Распознавание речи через каскадный STTService (Groq Whisper -> Gemini Audio -> Local Whisper)
    */
   public async transcribeAudio(audioBuffer: Buffer): Promise<string> {
-    const key = process.env.GROQ_API_KEY;
-    if (key) {
-      try {
-        const form = new FormData();
-        const fileBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-        form.append('file', fileBlob, 'voice.mp3');
-        form.append('model', 'whisper-large-v3');
-        form.append('language', 'ru');
-
-        const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${key}` },
-          body: form,
-          signal: AbortSignal.timeout(25000)
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          let recognized = (data?.text || '').trim();
-          const lower = recognized.toLowerCase();
-          if (
-            lower.includes('dimatorzok') ||
-            lower.includes('дима торжок') ||
-            lower.includes('субтитры') ||
-            lower.includes('субтитрами') ||
-            lower.includes('создал субтитры') ||
-            lower.includes('редактор субтитров') ||
-            lower.includes('продолжение следует') ||
-            lower.includes('спасибо за просмотр')
-          ) {
-            logger.warn(`⚠️ [MaxAdapter] Filtered Whisper hallucination: "${recognized}"`);
-            recognized = '';
-          }
-          return recognized;
-        } else {
-          logger.warn(`⚠️ [MaxAdapter] Groq Whisper returned status ${response.status}`);
-        }
-      } catch (groqErr: unknown) {
-        const errorMsg = groqErr instanceof Error ? groqErr.message : String(groqErr);
-        logger.warn(`⚠️ [MaxAdapter] Groq Whisper failed, trying VoiceService: ${errorMsg}`);
-      }
-    } else {
-      logger.warn('⚠️ [MaxAdapter] GROQ_API_KEY is not set, falling back to VoiceService');
-    }
-
-    // Fallback на VoiceService STT
     try {
-      const text = await this.voiceService.transcribe(audioBuffer, 'ru');
+      const { STTService } = await import("../services/voice/stt.service");
+      const stt = new STTService();
+      const text = await stt.transcribe(audioBuffer, 'ru');
       return text.trim();
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`❌ [MaxAdapter] VoiceService transcribe failed: ${errorMsg}`);
+      logger.error(`❌ [MaxAdapter] STTService transcribe failed: ${errorMsg}`);
       return '';
     }
   }

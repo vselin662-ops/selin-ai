@@ -262,7 +262,7 @@ export class TTSService {
     try {
       const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout")), 5000);
+        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout (15s)")), 15000);
       });
       audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
       if (audioBuffer) {
@@ -270,7 +270,7 @@ export class TTSService {
         ttsRequestsTotal.inc({ engine: 'edge-library' });
       }
     } catch (err: any) {
-      logger.error(`❌ [TTSService] Edge TTS library synthesis failed. Reason: ${err?.message || err}`);
+      logger.warn(`⚠️ [TTSService] Edge TTS library synthesis notice: ${err?.message || err}`);
     }
 
     // Попытка 2: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
