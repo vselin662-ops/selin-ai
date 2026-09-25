@@ -11,8 +11,8 @@ import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || 'gemini';
-const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'gemini-3.8-flash';
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || 'ollama';
+const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
 const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];
 const LITE_GEMINI_MODELS = ['gemini-3.5-flash-lite'];
@@ -946,9 +946,10 @@ ${identityBlock}
     }
 
     // === ГАРАНТИРОВАННЫЙ ВЫХОД В ИНТЕРНЕТ ЧЕРЕЗ WEBSEARCHSERVICE (DUCKDUCKGO) ===
-    const webTriggerRegex = /новост|сегодня|сейчас|актуальн|курс|цена|цен |последн|свеж|свежие|в этом году|когда родился|кто сейчас|кто так|что так|кто эт|что эт|найди|где находится|расскажи (про|о)|биографи|факты|описание|определение|локаци|адрес/i;
+    const isSelfOrIntro = /о себе|кто ты|что ты умеешь|как тебя зовут|твои возможности|кто создатель|кто автор/i.test(userMessage);
+    const webTriggerRegex = /новост|сегодня|сейчас|актуальн|курс|цена|цен |последн|свеж|свежие|в этом году|когда родился|кто сейчас|кто так|что так|найди|где находится|биографи|локаци|адрес/i;
     const hasCapitalizedWord = /[а-яё\s][А-ЯЁ][а-яё]+/g.test(userMessage);
-    const isSearchRequest = webTriggerRegex.test(userMessage) || hasCapitalizedWord;
+    const isSearchRequest = !isSelfOrIntro && (webTriggerRegex.test(userMessage) || (hasCapitalizedWord && userMessage.length > 25));
 
     if (isSearchRequest && !weatherKeywords.test(userMessage)) {
       try {
@@ -1024,9 +1025,9 @@ ${identityBlock}
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // 35s timeout per provider call
+        // 12s timeout per provider call
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Timeout 35s exceeded")), 35000);
+          setTimeout(() => reject(new Error("Timeout 12s exceeded")), 12000);
         });
         const res = await Promise.race([prov.call(), timeoutPromise]);
         const latency = Date.now() - provStart;
