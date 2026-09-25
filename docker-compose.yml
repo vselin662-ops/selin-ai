@@ -9,6 +9,8 @@ services:
     restart: always
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     env_file:

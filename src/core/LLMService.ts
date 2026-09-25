@@ -422,7 +422,7 @@ export function markFail(provider: string, error?: any) {
 
 export function isProviderConfigured(provider: string): boolean {
   if (provider === 'ollama') {
-    return !!process.env.OLLAMA_BASE_URL;
+    return true; // Always attempt Ollama as local/host engine
   }
   let key: string | undefined;
   if (provider === 'groq') key = process.env.GROQ_API_KEY;
@@ -1568,40 +1568,53 @@ ${identityBlock}
   }
 
   private async callOllama(messages: any[]): Promise<string> {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-    const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
-    const url = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+    const candidateUrls = [
+      process.env.OLLAMA_BASE_URL,
+      "http://host.docker.internal:11434",
+      "http://172.17.0.1:11434",
+      "http://127.0.0.1:11434",
+      "http://localhost:11434"
+    ].filter(Boolean) as string[];
 
+    const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
     const formattedMessages = messages.map(msg => ({
       role: msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user'),
       content: msg.content
     }));
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: formattedMessages,
-          temperature: 0.7,
-          stream: false
-        }),
-        signal: AbortSignal.timeout(30000)
-      });
+    let lastError: any = null;
 
-      if (!response.ok) {
-        throw new Error(`Ollama HTTP Error ${response.status}`);
+    for (const baseUrl of candidateUrls) {
+      const cleanBase = baseUrl.replace(/\/$/, '');
+      const url = `${cleanBase}/v1/chat/completions`;
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: formattedMessages,
+            temperature: 0.7,
+            stream: false
+          }),
+          signal: AbortSignal.timeout(15000)
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text) {
+            logger.info(`🦙 [Ollama] Responded successfully from ${cleanBase} using model ${model}`);
+            return sanitize(text);
+          }
+        }
+      } catch (err: any) {
+        lastError = err;
       }
-      const data: any = await response.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) {
-        throw new Error("Empty response from Ollama");
-      }
-      return sanitize(text);
-    } catch (err: any) {
-      throw new Error(`Ollama call failed: ${err?.message || err}`);
     }
+
+    throw new Error(`Ollama call failed on all candidate URLs: ${lastError?.message || lastError}`);
   }
 }
 
