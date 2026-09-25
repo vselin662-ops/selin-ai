@@ -406,12 +406,16 @@ export function markOk(provider: string) {
 }
 
 export function markFail(provider: string, error?: any) {
+  if (provider === 'ollama') {
+    // Никогда не блокируем локальную модель на 5 минут!
+    return;
+  }
   const errStr = String(error?.message || error || 'Unknown error');
-  let blockDurationMs = 5 * 60 * 1000; // default 5 min for 5xx/timeout/other
+  let blockDurationMs = 60 * 1000; // 60s for external API errors
   if (errStr.includes('429')) {
-    blockDurationMs = 60 * 1000; // 60 sec for rate limit (429)
-  } else if (errStr.includes('402') || errStr.toLowerCase().includes('invalid key') || errStr.toLowerCase().includes('auth') || errStr.toLowerCase().includes('unauthorized') || errStr.toLowerCase().includes('api key')) {
-    blockDurationMs = 60 * 60 * 1000; // 60 min for payment/auth/invalid key
+    blockDurationMs = 30 * 1000;
+  } else if (errStr.includes('402') || errStr.toLowerCase().includes('invalid key') || errStr.toLowerCase().includes('auth') || errStr.toLowerCase().includes('unauthorized')) {
+    blockDurationMs = 15 * 60 * 1000;
   }
   blockState.set(provider, {
     blockedUntil: Date.now() + blockDurationMs,
@@ -1025,9 +1029,10 @@ ${identityBlock}
       try {
         release = await providerQueue.acquire(prov.name, 10000);
 
-        // 12s timeout per provider call
+        // Dynamic timeout: 45s for Ollama, 15s for external APIs
+        const provTimeout = prov.name === 'ollama' ? 45000 : 15000;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Timeout 12s exceeded")), 12000);
+          setTimeout(() => reject(new Error(`Timeout ${provTimeout / 1000}s exceeded`)), provTimeout);
         });
         const res = await Promise.race([prov.call(), timeoutPromise]);
         const latency = Date.now() - provStart;
@@ -1587,10 +1592,10 @@ ${identityBlock}
 
     for (const baseUrl of candidateUrls) {
       const cleanBase = baseUrl.replace(/\/$/, '');
-      const url = `${cleanBase}/v1/chat/completions`;
 
+      // 1. Попытка через стандартный OpenAI-совместимый v1/chat/completions
       try {
-        const response = await fetch(url, {
+        const response = await fetch(`${cleanBase}/v1/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1599,14 +1604,39 @@ ${identityBlock}
             temperature: 0.7,
             stream: false
           }),
-          signal: AbortSignal.timeout(15000)
+          signal: AbortSignal.timeout(35000)
         });
 
         if (response.ok) {
           const data: any = await response.json();
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            logger.info(`🦙 [Ollama] Responded successfully from ${cleanBase} using model ${model}`);
+            logger.info(`🦙 [Ollama:v1] Responded successfully from ${cleanBase} using model ${model}`);
+            return sanitize(text);
+          }
+        }
+      } catch (err: any) {
+        lastError = err;
+      }
+
+      // 2. Попытка через нативный Ollama эндпоинт /api/chat
+      try {
+        const response = await fetch(`${cleanBase}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: formattedMessages,
+            stream: false
+          }),
+          signal: AbortSignal.timeout(35000)
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.message?.content?.trim();
+          if (text) {
+            logger.info(`🦙 [Ollama:native] Responded successfully from ${cleanBase} using model ${model}`);
             return sanitize(text);
           }
         }
