@@ -2208,6 +2208,57 @@ export class MaxAdapter {
         return res.status(200).send('ok');
       }
 
+      // === RAG: ПОИСК ПО БАЗЕ ЗНАНИЙ (ДОКУМЕНТЫ PDF, DOCX, TXT) ===
+      if (
+        lowerText.startsWith('найди:') ||
+        lowerText.startsWith('/rag ') ||
+        lowerText.startsWith('найди в документах ') ||
+        lowerText.startsWith('поиск по документам ') ||
+        lowerText.startsWith('по документу ')
+      ) {
+        const question = text
+          .replace(/^(?:найди:?|\/rag|найди\s+в\s+документах|поиск\s+по\s+документам|по\s+документу)\s*/i, '')
+          .trim();
+
+        if (question) {
+          const { documentRAGService } = await import("../services/DocumentRAGService");
+          const answer = await documentRAGService.queryDocuments(cleanId, question);
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, answer);
+          }
+          await this.safeSendMessageToChat(cleanId, answer);
+          return res.status(200).send('ok');
+        }
+      }
+
+      if (lowerText === 'мои документы' || lowerText === 'документы' || lowerText === '/documents' || lowerText === '/docs') {
+        const { documentRAGService } = await import("../services/DocumentRAGService");
+        const docs = documentRAGService.listDocuments(cleanId);
+        let reply = '';
+        if (docs.length > 0) {
+          reply = `📚 **Загруженные документы базы знаний**:\n\n` +
+            docs.map(d => `📄 [#${d.id}] **${d.filename}** (${d.total_chunks} фрагментов, ${d.created_at})`).join('\n') +
+            `\n\n💡 Чтобы найти ответ, напишите: «найди: [ваш вопрос]»\n💡 Чтобы удалить, напишите: «удали документ [ID]»`;
+        } else {
+          reply = '📚 У вас пока нет загруженных документов.\nВы можете прикрепить файл PDF, DOCX или TXT, либо загрузить через API.';
+        }
+        if (isVoiceInput) {
+          await this.synthesizeAndSendVoice(cleanId, reply);
+        }
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
+      const delDocMatch = lowerText.match(/^(?:удали\s+документ|\/delete_doc|\/del_doc)\s+(\d+)$/i);
+      if (delDocMatch) {
+        const docId = parseInt(delDocMatch[1], 10);
+        const { documentRAGService } = await import("../services/DocumentRAGService");
+        const ok = documentRAGService.deleteDocument(cleanId, docId);
+        const reply = ok ? `🗑️ Документ #${docId} успешно удален из базы знаний.` : `❌ Документ #${docId} не найден.`;
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
       // === НАВИГАЦИЯ: ПОВТОР ГОЛОСА МАРШРУТА ===
       if (
         lowerText === 'nav_repeat' ||

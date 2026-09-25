@@ -6,6 +6,7 @@ import aiRouter from "./ai.routes";
 import mcpRouter from "./mcp.routes";
 import legalRouter from "./legal.routes";
 import plannerRouter from "./planner.routes";
+import ragRouter from "./rag.routes";
 
 export {
   languageRouter,
@@ -15,5 +16,6 @@ export {
   aiRouter,
   mcpRouter,
   legalRouter,
-  plannerRouter
+  plannerRouter,
+  ragRouter
 };
