@@ -2592,6 +2592,42 @@ export class MaxAdapter {
         return res.status(200).send('ok');
       }
 
+      // Команды переключения режима озвучки
+      if (
+        lowerTrimmed === 'отвечай голосом' ||
+        lowerTrimmed === 'голос вкл' ||
+        lowerTrimmed === 'включи голос' ||
+        lowerTrimmed === '/voice_on' ||
+        lowerTrimmed === 'голос_вкл'
+      ) {
+        this.setVoiceMode(cleanId, VoiceMode.VOICE_TO_VOICE);
+        try {
+          const { setUserPlanConfig } = await import("../services/planning/UserPlanService");
+          setUserPlanConfig(cleanId, { voice_on: 1 });
+        } catch {}
+        const reply = "🎙️ Режим голосовых ответов включен! Теперь я буду озвучивать все ответы голосом.";
+        await this.synthesizeAndSendVoice(cleanId, reply);
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
+      if (
+        lowerTrimmed === 'только текст' ||
+        lowerTrimmed === 'голос выкл' ||
+        lowerTrimmed === 'выключи голос' ||
+        lowerTrimmed === '/voice_off' ||
+        lowerTrimmed === 'голос_выкл'
+      ) {
+        this.setVoiceMode(cleanId, VoiceMode.TEXT_TO_TEXT);
+        try {
+          const { setUserPlanConfig } = await import("../services/planning/UserPlanService");
+          setUserPlanConfig(cleanId, { voice_on: 0 });
+        } catch {}
+        const reply = "📝 Режим только текста активирован. Голосовые ответы отключены.";
+        await this.safeSendMessageToChat(cleanId, reply);
+        return res.status(200).send('ok');
+      }
+
       if (isOwner(cleanId) && (lowerTrimmed === 'голос: муж' || lowerTrimmed === 'голос: жен' || lowerTrimmed === 'голос:муж' || lowerTrimmed === 'голос:жен')) {
         const targetGender = (lowerTrimmed.includes('муж')) ? 'male' : 'female';
         setVoiceGender(cleanId, targetGender, 1); // 1 = принудительно зафиксирован!
@@ -2848,11 +2884,21 @@ export class MaxAdapter {
       const response = await this.core.processMessage(text, context);
       let replyText = response.text;
 
-      if (isVoiceInput) {
-        await this.synthesizeAndSendVoice(cleanId, replyText);
-      } else {
-        await this.safeSendMessageToChat(cleanId, replyText);
+      let isVoiceDesired = isVoiceInput || this.getVoiceMode(cleanId) === VoiceMode.VOICE_TO_VOICE || this.getVoiceMode(cleanId) === VoiceMode.TEXT_TO_VOICE;
+      if (!isVoiceDesired) {
+        try {
+          const { getUserPlanConfig } = await import("../services/planning/UserPlanService");
+          const planCfg = getUserPlanConfig(cleanId);
+          if (planCfg && planCfg.voice_on === 1) {
+            isVoiceDesired = true;
+          }
+        } catch {}
       }
+
+      if (isVoiceDesired) {
+        await this.synthesizeAndSendVoice(cleanId, replyText);
+      }
+      await this.safeSendMessageToChat(cleanId, replyText);
 
       return res.status(200).send('ok');
 
