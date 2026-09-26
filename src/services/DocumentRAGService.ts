@@ -2,7 +2,9 @@
 import { sqliteDb } from "../../db";
 import { logger } from "../logger";
 import { llmService } from "../core/LLMService";
-import pdfParse from "pdf-parse";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 import mammoth from "mammoth";
 
 export interface RAGDocument {
