@@ -31,6 +31,7 @@ import { NeonButton } from './components/NeonButton';
 import { StaffFeed } from './components/StaffFeed';
 import { ModerationPanel } from './components/ModerationPanel';
 import { KnowledgeBasePanel } from './components/KnowledgeBasePanel';
+import { BibleTrackerPanel } from './components/BibleTrackerPanel';
 import { VoiceButton } from './components/VoiceButton';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -114,7 +115,7 @@ const AVAILABLE_VOICES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'lifestyle' | 'feed' | 'moderation' | 'knowledge' | 'settings'>('main');
+  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'lifestyle' | 'bible' | 'feed' | 'moderation' | 'knowledge' | 'settings'>('main');
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceToast, setVoiceToast] = useState<string | null>(null);
   const [showMicGuide, setShowMicGuide] = useState(false);
@@ -665,6 +666,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('bible')}
+            className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
+              activeTab === 'bible'
+                ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold'
+                : 'bg-[#1C1715] text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#26201D]'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Библия и трекер</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('moderation')}
             className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
               activeTab === 'moderation'
@@ -1029,6 +1042,7 @@ export default function App() {
 
         {/* PANELS FROM HEADQUARTERS */}
         {activeTab === 'feed' && <StaffFeed />}
+        {activeTab === 'bible' && <BibleTrackerPanel />}
         {activeTab === 'moderation' && <ModerationPanel />}
         {activeTab === 'knowledge' && <KnowledgeBasePanel />}
         {activeTab === 'settings' && (

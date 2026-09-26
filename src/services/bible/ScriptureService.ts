@@ -440,6 +440,33 @@ class ScriptureServiceImpl {
   }
 
   /**
+   * getPassageByQuery(queryStr): Парсит текстовый запрос вроде "Иоанна 3:16", "Бытие 1:1-3", "Псалом 90", "Пс 22"
+   */
+  public async getPassageByQuery(query: string): Promise<ScriptureResult | null> {
+    if (!query) return null;
+    const clean = query.trim().replace(/^прочитай:?\s*/i, '').replace(/^стих:?\s*/i, '').replace(/^отрывок:?\s*/i, '').trim();
+
+    // Regex for parsing: [Название книги с пробелами/цифрами] [Глава](:[Стихи])?
+    // Matches e.g. "1 Коринфянам 13:4-8", "Иоанна 3:16", "Псалом 22", "Бытие 1"
+    const match = clean.match(/^((?:\d\s+)?[A-Za-zА-Яа-яЁё\s]+?)\s+(\d+)(?:[:\.](\d+(?:-\d+)?(?:,\d+)*))?$/i);
+    if (!match) {
+      return null;
+    }
+
+    const rawBook = match[1].trim();
+    const chapter = parseInt(match[2], 10);
+    const versePart = match[3] ? match[3].trim() : undefined;
+
+    if (isNaN(chapter) || chapter <= 0) return null;
+
+    if (versePart) {
+      return this.getPassage(rawBook, chapter, versePart);
+    } else {
+      return this.getChapter(rawBook, chapter);
+    }
+  }
+
+  /**
    * 1.3. randomPsalm(chatId?) from [1,2,3,8,15,22,23,26,27,33,34,37,50,51,62,84,90,102,103,120,126,127,130,145,150]
    * Does not repeat for 3 consecutive days for the same user!
    */

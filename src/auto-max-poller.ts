@@ -252,14 +252,18 @@ export async function poll(): Promise<void> {
   }
 }
 
-// Poll every 6 seconds as requested
-setInterval(poll, 6000);
+// Poll every 6 seconds if token exists
+const pollInterval = setInterval(() => {
+  if (process.env.MAX_BOT_TOKEN) {
+    poll().catch(() => {});
+  }
+}, 6000);
+pollInterval.unref();
 
 function clearAllSubscriptions(): Promise<void> {
   return new Promise((resolve) => {
     const token = process.env.MAX_BOT_TOKEN;
     if (!token) {
-      console.log('[AUTO-MAX-POLLER] No MAX_BOT_TOKEN to clear subscriptions.');
       return resolve();
     }
     console.log('[AUTO-MAX-POLLER] Cleaning any active webhook subscriptions via DELETE /subscriptions...');
@@ -298,8 +302,10 @@ function clearAllSubscriptions(): Promise<void> {
 }
 
 // Kick off initial poll after server bootstrap delay and webhook cleanup
-setTimeout(() => {
-  clearAllSubscriptions().then(() => {
-    poll().catch(() => {});
-  });
-}, 1500);
+if (process.env.MAX_BOT_TOKEN) {
+  setTimeout(() => {
+    clearAllSubscriptions().then(() => {
+      poll().catch(() => {});
+    });
+  }, 1500);
+}

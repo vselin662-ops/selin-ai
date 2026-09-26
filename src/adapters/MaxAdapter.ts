@@ -2259,6 +2259,56 @@ export class MaxAdapter {
         return res.status(200).send('ok');
       }
 
+      // === БИБЛИЯ: ЧТЕНИЕ СТИХОВ, ГЛАВ И ПСАЛМОВ (СИНОДАЛЬНЫЙ ТЕКСТ) ===
+      if (
+        lowerText.startsWith('прочитай ') ||
+        lowerText.startsWith('/bible ') ||
+        lowerText.startsWith('стих ') ||
+        lowerText.startsWith('отрывок ')
+      ) {
+        const query = text
+          .replace(/^(?:прочитай|\/bible|стих|отрывок)\s*/i, '')
+          .trim();
+
+        if (query) {
+          const { ScriptureService } = await import("../services/bible/ScriptureService");
+          const scripture = await ScriptureService.getPassageByQuery(query);
+
+          if (scripture) {
+            const formatted = `📖 **${scripture.ref}**\n\n${scripture.text}`;
+            if (isVoiceInput) {
+              await this.synthesizeAndSendVoice(cleanId, `${scripture.ref}. ${scripture.text}`);
+            }
+            await this.safeSendMessageToChat(cleanId, formatted);
+            return res.status(200).send('ok');
+          } else {
+            const notFound = `📖 По запросу «${query}» текст не найден. Проверьте правильность ссылки (например: «прочитай Иоанна 3:16» или «прочитай Псалом 90»).`;
+            if (isVoiceInput) {
+              await this.synthesizeAndSendVoice(cleanId, notFound);
+            }
+            await this.safeSendMessageToChat(cleanId, notFound);
+            return res.status(200).send('ok');
+          }
+        }
+      }
+
+      if (lowerText === 'псалом' || lowerText === 'псалом дня' || lowerText === '/psalm') {
+        const { ScriptureService } = await import("../services/bible/ScriptureService");
+        const psalm = await ScriptureService.randomPsalm(cleanId);
+        if (psalm) {
+          const reply = `🕊 **${psalm.ref}**\n\n${psalm.text}`;
+          if (isVoiceInput) {
+            await this.synthesizeAndSendVoice(cleanId, `${psalm.ref}. ${psalm.text}`);
+          }
+          await this.safeSendMessageToChat(cleanId, reply);
+          return res.status(200).send('ok');
+        } else {
+          const errMsg = '🕊 Псалом временно недоступен. Попробуйте немного позже.';
+          await this.safeSendMessageToChat(cleanId, errMsg);
+          return res.status(200).send('ok');
+        }
+      }
+
       // === НАВИГАЦИЯ: ПОВТОР ГОЛОСА МАРШРУТА ===
       if (
         lowerText === 'nav_repeat' ||
