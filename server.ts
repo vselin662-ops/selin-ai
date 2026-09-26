@@ -138,7 +138,7 @@ app.use((req, res, next) => {
 });
 
 // 2. Global Parsers
-app.use(cors({ origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(','), credentials: true }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -305,6 +305,34 @@ app.get("/metrics", async (_, res) => {
 
 // 7. Server Boot and Lifecycle
 async function startServer() {
+  // Vite development middleware or static production serving
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  const serverInstance = app.listen(PORT, "0.0.0.0", () => {
+    logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT}`);
+  });
+
+  serverInstance.on("error", (err: unknown) => {
+    const msg = err instanceof Error ? (err.stack || err.message) : String(err);
+    logger.error(`🚨 [Server Network Error] serverInstance emitted error: ${msg}`);
+  });
+
+  // Background Database & Service Initialization (Non-blocking)
   try {
     await initSessionsDb();
     logger.info("📁 Sessions Database initialized successfully using sqlite3 (async/await)");
@@ -338,107 +366,87 @@ async function startServer() {
     logger.error("❌ Error initializing sessions database:", { error: err });
   }
 
-  // Vite development middleware or static production serving
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: false,
-      },
-      appType: "spa",
+  // Background schedulers
+  startBibleScheduler(
+    async (chatId, text) => {
+      await modernMaxAdapter.sendMessage(chatId, text);
+    },
+    async (chatId, text) => {
+      await modernMaxAdapter.sendVoice(chatId, text);
+    }
+  );
+  startMorningScheduler(
+    async (chatId, text, extra) => {
+      await modernMaxAdapter.safeSendMessageToChat(chatId, text, extra);
+    },
+    async (chatId, text) => {
+      await modernMaxAdapter.sendVoice(chatId, text);
+    }
+  );
+
+  // Start Subscription Reminder Scheduler
+  import("./src/fintech/subscriptions").then(({ startSubscriptionReminderScheduler }) => {
+    startSubscriptionReminderScheduler(async (chatId, text, extra) => {
+      await modernMaxAdapter.safeSendMessageToChat(chatId, text, extra);
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  const serverInstance = app.listen(PORT, "0.0.0.0", () => {
-    logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT}`);
-    startBibleScheduler(
-      async (chatId, text) => {
-        await modernMaxAdapter.sendMessage(chatId, text);
-      },
-      async (chatId, text) => {
-        await modernMaxAdapter.sendVoice(chatId, text);
-      }
-    );
-    startMorningScheduler(
-      async (chatId, text, extra) => {
-        await modernMaxAdapter.safeSendMessageToChat(chatId, text, extra);
-      },
-      async (chatId, text) => {
-        await modernMaxAdapter.sendVoice(chatId, text);
-      }
-    );
-
-    // Start Subscription Reminder Scheduler
-    import("./src/fintech/subscriptions").then(({ startSubscriptionReminderScheduler }) => {
-      startSubscriptionReminderScheduler(async (chatId, text, extra) => {
-        await modernMaxAdapter.safeSendMessageToChat(chatId, text, extra);
-      });
-    }).catch((err) => {
-      logger.error("❌ Error initializing subscription reminder scheduler:", err);
-    });
-
-    // Start Reminder Scheduler
-    setInterval(async () => {
-      try {
-        const { checkAndSendReminders } = await import("./src/services/planning/ReminderService");
-        await checkAndSendReminders(async (chatId, text) => {
-          await modernMaxAdapter.sendMessage(chatId, text);
-        });
-      } catch (err) {
-        logger.error("❌ Error running checkAndSendReminders:", err);
-      }
-    }, 20000);
-
-    // Run Voice Synthesis Self-Test & Start Hook Pre-generation
-    (async () => {
-      try {
-        const { synthesizeForChat } = await import("./src/services/voice/TTSService");
-        logger.info("🧪 [Voice Self-Test] Initiating voice synthesis self-test...");
-        const testChatId = "test_self_check_chat";
-        const testText = "Здравствуйте, я Селин, ваш помощник";
-        const audioBuffer = await synthesizeForChat(testChatId, testText);
-        if (audioBuffer) {
-          logger.info(`🧪 [Voice Self-Test] Successfully synthesized "${testText}" for chat ${testChatId}. Buffer size: ${audioBuffer.length} bytes.`);
-        } else {
-          logger.error(`❌ [Voice Self-Test] Voice self-test returned null Buffer.`);
-        }
-      } catch (err: any) {
-        logger.error(`❌ [Voice Self-Test] Voice self-test failed: ${err.message || err}`);
-      }
-
-      // Pre-generate Start Voice Hook (asynchronously, non-blocking)
-      try {
-        const { pregenerateStartHook } = await import("./src/services/voice/StartHookService");
-        await pregenerateStartHook(true);
-      } catch (err: any) {
-        logger.warn(`⚠️ [StartHook] Server startup pre-generation error: ${err?.message || err}`);
-      }
-
-      // Run Image Generation Self-Test (asynchronously)
-      try {
-        const { runImageGenSelfTest } = await import("./src/adapters/MaxAdapter");
-        await runImageGenSelfTest();
-      } catch (err: any) {
-        logger.error(`❌ [ImageGen Self-Test] Startup check failed: ${err?.message || err}`);
-      }
-
-      // Start LegalScout Scheduler
-      try {
-        const { startLegalScoutScheduler } = await import("./src/agents/LegalScout");
-        startLegalScoutScheduler();
-        logger.info("✅ [LegalScout] Scheduler started successfully.");
-      } catch (err: any) {
-        logger.error("❌ Failed to start LegalScout Scheduler:", err);
-      }
-    })();
+  }).catch((err) => {
+    logger.error("❌ Error initializing subscription reminder scheduler:", err);
   });
+
+  // Start Reminder Scheduler
+  setInterval(async () => {
+    try {
+      const { checkAndSendReminders } = await import("./src/services/planning/ReminderService");
+      await checkAndSendReminders(async (chatId, text) => {
+        await modernMaxAdapter.sendMessage(chatId, text);
+      });
+    } catch (err) {
+      logger.error("❌ Error running checkAndSendReminders:", err);
+    }
+  }, 20000);
+
+  // Run Voice Synthesis Self-Test & Start Hook Pre-generation
+  (async () => {
+    try {
+      const { synthesizeForChat } = await import("./src/services/voice/TTSService");
+      logger.info("🧪 [Voice Self-Test] Initiating voice synthesis self-test...");
+      const testChatId = "test_self_check_chat";
+      const testText = "Здравствуйте, я Селин, ваш помощник";
+      const audioBuffer = await synthesizeForChat(testChatId, testText);
+      if (audioBuffer) {
+        logger.info(`🧪 [Voice Self-Test] Successfully synthesized "${testText}" for chat ${testChatId}. Buffer size: ${audioBuffer.length} bytes.`);
+      } else {
+        logger.error(`❌ [Voice Self-Test] Voice self-test returned null Buffer.`);
+      }
+    } catch (err: any) {
+      logger.error(`❌ [Voice Self-Test] Voice self-test failed: ${err.message || err}`);
+    }
+
+    // Pre-generate Start Voice Hook (asynchronously, non-blocking)
+    try {
+      const { pregenerateStartHook } = await import("./src/services/voice/StartHookService");
+      await pregenerateStartHook(true);
+    } catch (err: any) {
+      logger.warn(`⚠️ [StartHook] Server startup pre-generation error: ${err?.message || err}`);
+    }
+
+    // Run Image Generation Self-Test (asynchronously)
+    try {
+      const { runImageGenSelfTest } = await import("./src/adapters/MaxAdapter");
+      await runImageGenSelfTest();
+    } catch (err: any) {
+      logger.error(`❌ [ImageGen Self-Test] Startup check failed: ${err?.message || err}`);
+    }
+
+    // Start LegalScout Scheduler
+    try {
+      const { startLegalScoutScheduler } = await import("./src/agents/LegalScout");
+      startLegalScoutScheduler();
+      logger.info("✅ [LegalScout] Scheduler started successfully.");
+    } catch (err: any) {
+      logger.error("❌ Failed to start LegalScout Scheduler:", err);
+    }
+  })();
 
   function gracefulShutdown(signal: string) {
     logger.info(`Received ${signal}, shutting down gracefully...`);
@@ -478,4 +486,7 @@ async function startServer() {
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
-startServer();
+startServer().catch((err: unknown) => {
+  const msg = err instanceof Error ? (err.stack || err.message) : String(err);
+  console.error(`🚨 [Server Boot Failure] startServer failed: ${msg}`);
+});
