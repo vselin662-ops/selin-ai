@@ -7,20 +7,15 @@ const VALID_CHAT_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
  * Validates and sanitizes chat/user identifiers.
  * Strictly checks that ID conforms to /^[a-zA-Z0-9_-]+$/.
  */
-export function validateChatId(id: unknown): string {
-  if (typeof id === 'number' && Number.isFinite(id)) {
-    return String(Math.floor(id));
+export function validateChatId(id: string | number): string {
+  if (id === null || id === undefined) {
+    throw new Error('Недопустимый формат chatId');
   }
-  if (typeof id !== 'string') {
-    logger.warn('[idSanitizer] Non-string/non-number ID provided, returning empty string', { id });
-    return '';
+  const strId = String(id).trim();
+  if (!VALID_CHAT_ID_REGEX.test(strId)) {
+    throw new Error('Недопустимый формат chatId');
   }
-  const trimmed = id.trim();
-  if (!VALID_CHAT_ID_REGEX.test(trimmed)) {
-    logger.warn('[idSanitizer] Chat ID does not match valid pattern', { id: trimmed });
-    return '';
-  }
-  return trimmed;
+  return strId;
 }
 
 /**

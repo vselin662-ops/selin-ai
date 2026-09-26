@@ -55,9 +55,12 @@ export class MaxWebhookRouter {
       payload.message?.sender?.id ||
       '';
 
-    const chatId = validateChatId(rawChatId);
-    if (!chatId) {
-      logger.warn('[MaxWebhookRouter] Invalid or missing chatId in payload, skipping message', { rawChatId });
+    let chatId = '';
+    try {
+      chatId = validateChatId(rawChatId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[MaxWebhookRouter] Invalid chatId in payload: ${msg}`, { rawChatId });
       return false;
     }
 

@@ -37,7 +37,7 @@ function createMockContext(overrides: Partial<HandlerContext> = {}): HandlerCont
 test('idSanitizer: validates and parses IDs', () => {
   assert.equal(validateChatId('12345'), '12345');
   assert.equal(validateChatId('user_abc-123'), 'user_abc-123');
-  assert.equal(validateChatId('bad id with spaces'), '');
+  assert.throws(() => validateChatId('bad id with spaces'), /Недопустимый формат chatId/);
   assert.equal(validateChatId(999), '999');
   assert.equal(parseNumericId('12345'), 12345);
 });

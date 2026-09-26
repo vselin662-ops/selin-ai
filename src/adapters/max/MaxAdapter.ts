@@ -92,9 +92,12 @@ export class MaxAdapter {
    * High-level send method for external services (schedulers, reminders, etc.).
    */
   public async sendToUser(chatId: string | number, text: string, options?: SendMessageOptions): Promise<boolean> {
-    const validId = validateChatId(chatId);
-    if (!validId) {
-      logger.warn('[MaxAdapter] Cannot send message: invalid chatId', { chatId });
+    let validId = '';
+    try {
+      validId = validateChatId(chatId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[MaxAdapter] Cannot send message: ${msg}`, { chatId });
       return false;
     }
 
