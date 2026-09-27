@@ -122,17 +122,23 @@ export class MaxSender {
     token: string,
     extra?: Record<string, unknown>
   ): Promise<boolean> {
+    const numericId = parseInt(chatId, 10);
     const bodyObj: Record<string, unknown> = {
       text,
-      chat_id: chatId,
+      chat_id: Number.isFinite(numericId) ? numericId : chatId,
+      user_id: Number.isFinite(numericId) ? numericId : undefined,
+      recipient: {
+        chat_id: Number.isFinite(numericId) ? numericId : chatId
+      },
       ...extra
     };
 
     const payload = JSON.stringify(bodyObj);
+    const queryPath = `/messages?chat_id=${encodeURIComponent(chatId)}`;
 
     for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
       try {
-        const status = await this.postJsonRequest('/messages', payload, token);
+        const status = await this.postJsonRequest(queryPath, payload, token);
         if (status >= 200 && status < 300) {
           this.consecutiveErrors = 0;
           return true;
@@ -175,7 +181,7 @@ export class MaxSender {
   }
 
   /**
-   * Native HTTPS POST utility for MAX API.
+   * Native HTTPS POST utility for MAX API with response body logging.
    */
   private static postJsonRequest(path: string, bodyJson: string, token: string): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -195,8 +201,14 @@ export class MaxSender {
           timeout: 10000
         },
         (res) => {
-          res.resume();
-          resolve(res.statusCode || 500);
+          let resData = '';
+          res.on('data', (chunk) => { resData += chunk; });
+          res.on('end', () => {
+            if (res.statusCode && res.statusCode >= 400) {
+              logger.warn(`[MaxSender] MAX API returned ${res.statusCode}: ${resData}`);
+            }
+            resolve(res.statusCode || 500);
+          });
         }
       );
 

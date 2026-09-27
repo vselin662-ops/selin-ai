@@ -43,6 +43,9 @@ export class MaxWebhookRouter {
 
     // 2. Extract and validate chatId
     const rawChatId =
+      payload.message?.recipient?.chat_id ||
+      payload.body?.message?.recipient?.chat_id ||
+      payload.recipient?.chat_id ||
       payload.chat_id ||
       payload.user_id ||
       payload.body?.user?.user_id ||

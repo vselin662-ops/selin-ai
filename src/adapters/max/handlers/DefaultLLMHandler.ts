@@ -2,6 +2,7 @@
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
 import { SelinCore } from '../../../core/SelinCore';
+import { ChannelType } from '../../../core/types';
 
 export class DefaultLLMHandler implements IMessageHandler {
   public readonly name = 'DefaultLLMHandler';
@@ -20,9 +21,9 @@ export class DefaultLLMHandler implements IMessageHandler {
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
     try {
       logger.info(`[DefaultLLMHandler] Delegating text to SelinCore for chat ${ctx.chatId}`);
-      const response = await this.selinCore.processInput(ctx.text, {
-        userId: ctx.chatId,
-        channel: 'max',
+      const response = await this.selinCore.processMessage(ctx.text, {
+        chatId: ctx.chatId,
+        channel: ChannelType.MAX,
         isVoice: ctx.isVoiceInput
       });
 
