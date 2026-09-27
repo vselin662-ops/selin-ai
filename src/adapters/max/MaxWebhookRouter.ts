@@ -69,9 +69,12 @@ export class MaxWebhookRouter {
 
     // 3. Extract text
     const rawText =
+      payload.message?.body?.text ||
+      payload.body?.message?.body?.text ||
       payload.body?.text ||
       payload.body?.message?.text ||
       payload.message?.text ||
+      (payload.update_type === 'bot_started' ? '/start' : '') ||
       payload.callback_data ||
       payload.body?.payload ||
       payload.payload?.payload ||

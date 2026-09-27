@@ -12,6 +12,8 @@ export function parseAttachments(payload: MaxWebhookPayload): ParsedAttachments 
   };
 
   const rawAttachments =
+    payload.message?.body?.attachments ||
+    payload.body?.message?.body?.attachments ||
     payload.body?.attachments ||
     payload.body?.message?.attachments ||
     payload.message?.attachments ||
