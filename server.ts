@@ -16,8 +16,9 @@ process.on('uncaughtException', (error: Error, origin: string) => {
 
 import { createServer as createViteServer } from "vite";
 import { sqliteDb } from "./db";
-import { apiRateLimiter, expensiveOpLimiter } from "./middleware/rateLimit";
+import { apiRateLimiter, expensiveOpLimiter, adminLoginLimiter } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
+import { webModelArmor, webSemanticGuard, webAnomalyDetector } from "./src/web/middleware/security";
 import { logger } from "./src/logger";
 import { metrics } from "./src/metrics";
 import { getPrometheusMetrics, getPrometheusContentType } from "./src/metrics/prometheus";
@@ -246,8 +247,45 @@ app.use((req, res, next) => {
   next();
 });
 
-// 6. Mount Modular API Routers
-app.post("/api/admin/login", adminLoginHandler);
+// 6. Mount Modular API Routers & Web Security Layer
+app.use("/api", (req, res, next) => {
+  // Исключаем вебхуки мессенджеров и платежей из веб-защиты
+  if (
+    req.originalUrl.startsWith("/api/max/webhook") ||
+    req.originalUrl.startsWith("/api/telegram") ||
+    req.originalUrl.startsWith("/api/yookassa") ||
+    req.originalUrl.startsWith("/api/robokassa")
+  ) {
+    return next();
+  }
+  return webAnomalyDetector(req, res, next);
+});
+
+app.use("/api", (req, res, next) => {
+  if (
+    req.originalUrl.startsWith("/api/max/webhook") ||
+    req.originalUrl.startsWith("/api/telegram") ||
+    req.originalUrl.startsWith("/api/yookassa") ||
+    req.originalUrl.startsWith("/api/robokassa")
+  ) {
+    return next();
+  }
+  return webModelArmor(req, res, next);
+});
+
+app.use("/api", (req, res, next) => {
+  if (
+    req.originalUrl.startsWith("/api/max/webhook") ||
+    req.originalUrl.startsWith("/api/telegram") ||
+    req.originalUrl.startsWith("/api/yookassa") ||
+    req.originalUrl.startsWith("/api/robokassa")
+  ) {
+    return next();
+  }
+  return webSemanticGuard(req, res, next);
+});
+
+app.post("/api/admin/login", adminLoginLimiter, adminLoginHandler);
 
 app.use((req, res, next) => {
   const url = req.originalUrl;
@@ -278,7 +316,18 @@ app.use((req, res, next) => {
 app.use(fintechRouter);
 app.use(yookassaWebhookRouter);
 app.use("/api", (req, res, next) => {
-  if (req.originalUrl.startsWith("/api/max/webhook") || req.originalUrl.startsWith("/api/ai/") || req.originalUrl.startsWith("/api/yookassa") || req.originalUrl.startsWith("/api/robokassa") || req.originalUrl.startsWith("/api/payments") || req.originalUrl.startsWith("/api/health")) return next();
+  if (
+    req.originalUrl.startsWith("/api/max/webhook") || 
+    req.originalUrl.startsWith("/api/ai/") || 
+    req.originalUrl.startsWith("/api/yookassa") || 
+    req.originalUrl.startsWith("/api/robokassa") || 
+    req.originalUrl.startsWith("/api/payments") || 
+    req.originalUrl.startsWith("/api/health") ||
+    req.originalUrl.startsWith("/api/bible") ||
+    req.originalUrl.startsWith("/api/rag") ||
+    req.originalUrl.startsWith("/api/orchestrator") ||
+    req.originalUrl.startsWith("/api/planner")
+  ) return next();
   return authMiddleware(req, res, next);
 });
 
@@ -293,6 +342,23 @@ app.use("/api/rag", ragRouter);
 app.use("/api/bible", bibleRouter);
 app.use("/api", healthRouter);
 app.use(legalRouter);
+
+// Global Error Handler - Masking internal error stack traces to clients
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  logger.error(`🚨 [GlobalErrorHandler] Unhandled error on ${req.method} ${req.originalUrl}: ${msg}`, { stack });
+
+  if (res.headersSent) {
+    return;
+  }
+
+  const statusCode = (err as { status?: number; statusCode?: number }).statusCode || (err as { status?: number }).status || 500;
+  res.status(statusCode).json({
+    error: statusCode >= 500 ? "Internal Server Error" : "Request Processing Error",
+    message: statusCode >= 500 ? "Произошла внутренняя ошибка сервера. Пожалуйста, повторите запрос позже." : msg
+  });
+});
 
 // Prometheus / OpenMetrics endpoint
 app.get("/metrics", async (_, res) => {

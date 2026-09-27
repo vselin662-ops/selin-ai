@@ -33,6 +33,10 @@ export const PUBLIC_PATHS = [
   '/api/agent-respond',
   '/api/launch',
   '/api/ai',
+  '/api/orchestrator',
+  '/api/bible',
+  '/api/rag',
+  '/api/planner',
   '/api/telegram/webhook',
   '/telegram/webhook'
 ];

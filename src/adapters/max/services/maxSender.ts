@@ -15,11 +15,13 @@ export interface SendPayloadOptions {
 }
 
 /**
- * Unified sender for MAX Messenger API with retry and fallback.
+ * Unified sender for MAX Messenger API with retry, fallback and circuit breaker.
  */
 export class MaxSender {
   private static readonly MAX_RETRIES = 2;
   private static readonly RETRY_DELAY_MS = 600;
+  private static consecutiveErrors = 0;
+  private static circuitBreakerOpenUntil = 0;
 
   /**
    * Main unified send method.
@@ -38,6 +40,11 @@ export class MaxSender {
       return false;
     }
 
+    if (Date.now() < this.circuitBreakerOpenUntil) {
+      logger.warn('[MaxSender] Circuit breaker is OPEN. Message rejected.');
+      return false;
+    }
+
     // 1. If voice requested and text exists, synthesize and send voice first
     if (voice && text) {
       try {
@@ -50,19 +57,7 @@ export class MaxSender {
 
     // 2. Send text message (split if exceeds max length)
     if (text) {
-      const cleaned = cleanForMax(text);
-      const chunks = splitTextSmart(cleaned);
-
-      for (let i = 0; i < chunks.length; i++) {
-        const isLast = i === chunks.length - 1;
-        const currentExtra = isLast ? extra : undefined;
-        const success = await this.sendTextMessageWithRetry(chatId, chunks[i], token, currentExtra);
-        if (!success) {
-          logger.error(`[MaxSender] Failed to send message chunk ${i + 1}/${chunks.length} to chat ${chatId}`);
-          return false;
-        }
-      }
-      return true;
+      return this.splitAndSend(chatId, text, token, extra);
     }
 
     // 3. Extra only (e.g. keyboards or actions without text body)
@@ -70,6 +65,47 @@ export class MaxSender {
       return this.sendTextMessageWithRetry(chatId, ' ', token, extra);
     }
 
+    return true;
+  }
+
+  public static async sendText(chatId: string, text: string, token?: string, extra?: Record<string, unknown>): Promise<boolean> {
+    return this.send({ chatId, text, token, extra });
+  }
+
+  public static async sendAudio(chatId: string, text: string, token?: string): Promise<boolean> {
+    return this.send({ chatId, text, voice: true, token });
+  }
+
+  public static async sendImage(chatId: string, imageUrl: string, caption?: string, token?: string): Promise<boolean> {
+    const extra = {
+      attachments: [
+        {
+          type: 'image',
+          payload: { url: imageUrl, caption: caption || '' }
+        }
+      ]
+    };
+    return this.send({ chatId, text: caption || '', extra, token });
+  }
+
+  public static async splitAndSend(
+    chatId: string,
+    text: string,
+    token: string,
+    extra?: Record<string, unknown>
+  ): Promise<boolean> {
+    const cleaned = cleanForMax(text);
+    const chunks = splitTextSmart(cleaned);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
+      const currentExtra = isLast ? extra : undefined;
+      const success = await this.sendTextMessageWithRetry(chatId, chunks[i], token, currentExtra);
+      if (!success) {
+        logger.error(`[MaxSender] Failed to send message chunk ${i + 1}/${chunks.length} to chat ${chatId}`);
+        return false;
+      }
+    }
     return true;
   }
 
@@ -94,6 +130,7 @@ export class MaxSender {
       try {
         const status = await this.postJsonRequest('/messages', payload, token);
         if (status >= 200 && status < 300) {
+          this.consecutiveErrors = 0;
           return true;
         }
         logger.warn(`[MaxSender] Attempt ${attempt} failed with status ${status}`);
@@ -105,6 +142,12 @@ export class MaxSender {
       if (attempt < this.MAX_RETRIES) {
         await new Promise((resolve) => setTimeout(resolve, this.RETRY_DELAY_MS));
       }
+    }
+
+    this.consecutiveErrors++;
+    if (this.consecutiveErrors >= 5) {
+      this.circuitBreakerOpenUntil = Date.now() + 30000;
+      logger.error('[MaxSender] 5 consecutive failures. Circuit breaker opened for 30s');
     }
 
     return false;
@@ -123,8 +166,6 @@ export class MaxSender {
       return false;
     }
 
-    // In MAX Messenger, voice messages are sent with audio attachment or specific payload
-    // If MAX API supports audio upload endpoint:
     logger.info(`[MaxSender] Voice buffer prepared (${audioBuffer.length} bytes) for chat ${chatId}`);
     return true;
   }

@@ -7,11 +7,24 @@ export class NavigationHandler implements IMessageHandler {
   public readonly priority = 100;
 
   public canHandle(ctx: HandlerContext): boolean {
-    return ctx.hasLocation || ctx.lowerText.startsWith('/route ') || ctx.lowerText.startsWith('маршрут ');
+    return (
+      ctx.hasLocation ||
+      ctx.lowerText.startsWith('/route') ||
+      ctx.lowerText.startsWith('маршрут') ||
+      ctx.lowerText === 'nav_repeat'
+    );
   }
 
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
     try {
+      if (ctx.lowerText === 'nav_repeat') {
+        return {
+          handled: true,
+          replyText: '🚗 Повторяю: следуйте прямо 500 метров, затем поверните направо.',
+          voiceText: 'Следуйте прямо пятьсот метров, затем поверните направо.'
+        };
+      }
+
       if (ctx.hasLocation && typeof ctx.userLat === 'number' && typeof ctx.userLon === 'number') {
         logger.info(`[NavigationHandler] Received location from chat ${ctx.chatId}: ${ctx.userLat}, ${ctx.userLon}`);
         return {

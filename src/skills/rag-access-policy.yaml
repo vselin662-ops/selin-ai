@@ -1,0 +1,10 @@
+skillName: rag-access
+version: "1.0.0"
+allowedRoles:
+  - "user"
+  - "owner"
+maxDocumentSizeKb: 10240
+supportedFormats:
+  - ".pdf"
+  - ".docx"
+  - ".txt"

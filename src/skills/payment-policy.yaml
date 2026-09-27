@@ -1,0 +1,7 @@
+skillName: payment
+version: "1.0.0"
+allowedRoles:
+  - "*"
+hitlRequired: true
+maxAmountRub: 50000
+autoExpiryMinutes: 15

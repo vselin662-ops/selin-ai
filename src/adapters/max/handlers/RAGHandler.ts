@@ -2,6 +2,9 @@
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
 import { documentRAGService } from '../../../services/DocumentRAGService';
+import { DeepSearchEngine } from '../../../engines/DeepSearchEngine';
+import { BatchProcessor } from '../../../engines/BatchProcessor';
+import { HITLEngine } from '../../../engines/HITLEngine';
 
 export class RAGHandler implements IMessageHandler {
   public readonly name = 'RAGHandler';
@@ -22,14 +25,23 @@ export class RAGHandler implements IMessageHandler {
       const text = ctx.text.trim();
       const lower = ctx.lowerText;
 
-      // 1. Query documents
+      // 1. Query documents with DeepSearch
       if (lower.startsWith('найди:') || lower.startsWith('найди ')) {
         const query = text.replace(/^найди:?\s*/i, '').trim();
         if (!query) {
           return { handled: true, replyText: '🔍 Укажите поисковый запрос по вашим документам.' };
         }
 
-        const ragResult = await documentRAGService.queryDocuments(ctx.chatId, query);
+        const deepRes = await DeepSearchEngine.iterativeSearch(query, async (q) => {
+          const res = await documentRAGService.queryDocuments(ctx.chatId, q);
+          return res.sources.length > 0 ? [res] : [];
+        });
+
+        const ragResult =
+          deepRes.results.length > 0
+            ? deepRes.results[0]
+            : await documentRAGService.queryDocuments(ctx.chatId, query);
+
         let reply = `🔍 **Ответ на основе ваших документов**:\n\n${ragResult.answer}`;
 
         if (ragResult.sources.length > 0) {
@@ -61,7 +73,7 @@ export class RAGHandler implements IMessageHandler {
         return { handled: true, replyText: reply.trim() };
       }
 
-      // 3. Delete document
+      // 3. Delete document with HITL
       if (lower.startsWith('удали документ ')) {
         const idStr = lower.replace('удали документ ', '').trim();
         const docId = parseInt(idStr, 10);
@@ -69,11 +81,32 @@ export class RAGHandler implements IMessageHandler {
           return { handled: true, replyText: '⚠️ Укажите числовой номер документа.' };
         }
 
-        const success = await documentRAGService.deleteDocument(docId, ctx.chatId);
-        if (success) {
-          return { handled: true, replyText: `🗑 Документ #${docId} успешно удален из базы знаний.` };
-        }
-        return { handled: true, replyText: `⚠️ Не удалось удалить документ #${docId}.` };
+        const hitl = HITLEngine.requestConfirmation(
+          ctx.chatId,
+          'DOCUMENT_DELETE',
+          `Удаление документа #${docId}`,
+          { docId }
+        );
+
+        return {
+          handled: true,
+          replyText: `⚠️ Запрос на удаление документа #${docId} сформирован. Подтвердите действие: ID \`${hitl.actionId}\`.`,
+          extra: {
+            attachments: [
+              {
+                type: 'inline_keyboard',
+                payload: {
+                  buttons: [
+                    [
+                      { type: 'callback', text: '🗑 Подтвердить удаление', payload: `approve_${hitl.actionId}` },
+                      { type: 'callback', text: 'Отмена', payload: `reject_${hitl.actionId}` }
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        };
       }
 
       return { handled: false };

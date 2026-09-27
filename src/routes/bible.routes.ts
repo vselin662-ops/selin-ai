@@ -94,6 +94,26 @@ router.get("/psalm", async (req: CustomRequest, res: Response) => {
 });
 
 /**
+ * GET /api/bible/daily - Получить стих/чтение дня
+ */
+router.get("/daily", async (req: CustomRequest, res: Response) => {
+  try {
+    const chatId = resolveChatId(req);
+    const psalm = await ScriptureService.randomPsalm(chatId);
+    const daySummary = getPlanDaySummary(chatId, false);
+    return res.status(200).json({
+      success: true,
+      psalm,
+      plan: daySummary
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`❌ [BibleRoutes] Error fetching daily scripture: ${msg}`);
+    return res.status(500).json({ success: false, error: "Ошибка при получении чтения дня" });
+  }
+});
+
+/**
  * GET /api/bible/plan - Получить статус и день Плана Победы
  */
 router.get("/plan", (req: CustomRequest, res: Response) => {

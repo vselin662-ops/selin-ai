@@ -1,10 +1,13 @@
 // src/adapters/max/handlers/OwnerCommandHandler.ts
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
+import { DiagnosticEngine } from '../../../engines/DiagnosticEngine';
+import { AnomalyDetector } from '../../../engines/AnomalyDetector';
+import { HITLEngine } from '../../../engines/HITLEngine';
 
 export class OwnerCommandHandler implements IMessageHandler {
   public readonly name = 'OwnerCommandHandler';
-  public readonly priority = 50;
+  public readonly priority = 75;
 
   public canHandle(ctx: HandlerContext): boolean {
     if (!ctx.isOwner) return false;
@@ -12,8 +15,9 @@ export class OwnerCommandHandler implements IMessageHandler {
     return (
       text.startsWith('/admin') ||
       text.startsWith('админ') ||
-      text.startsWith('/broadcast ') ||
-      text.startsWith('/status')
+      text.startsWith('/broadcast') ||
+      text.startsWith('/status') ||
+      text.startsWith('/diagnostics')
     );
   }
 
@@ -21,27 +25,50 @@ export class OwnerCommandHandler implements IMessageHandler {
     try {
       const text = ctx.lowerText;
 
-      if (text === '/status' || text === 'статус') {
-        const memoryUsage = process.memoryUsage();
-        const heapMb = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+      if (text === '/status' || text === 'статус' || text === '/diagnostics') {
+        const diag = DiagnosticEngine.runDiagnostics();
         return {
           handled: true,
-          replyText: `👑 **Панель владельца: Статус системы**\n\n• Uptime: ${Math.round(process.uptime())} сек.\n• Память: ${heapMb} МБ heap\n• Окружение: ${process.env.NODE_ENV || 'development'}`
+          replyText:
+            `👑 **Панель владельца: Диагностика системы**\n\n` +
+            `• Статус: **${diag.status}**\n` +
+            `• Аптайм: ${diag.uptimeSeconds} сек.\n` +
+            `• Память Heap: ${diag.heapUsedMb} МБ\n` +
+            `• Проблемы: ${diag.issues.length > 0 ? diag.issues.join(', ') : 'Отсутствуют'}`
         };
       }
 
-      if (text.startsWith('/broadcast ')) {
-        const msg = ctx.text.replace('/broadcast ', '').trim();
-        logger.info(`[OwnerCommandHandler] Broadcast initiated: "${msg}"`);
+      if (text.startsWith('/broadcast')) {
+        const msg = ctx.text.replace(/^\/broadcast\s*/i, '').trim();
+        if (!msg) {
+          return { handled: true, replyText: '⚠️ Укажите текст рассылки: `/broadcast [текст]`.' };
+        }
+
+        const hitl = HITLEngine.requestConfirmation(ctx.chatId, 'BROADCAST', `Рассылка сообщения: "${msg}"`, { msg });
         return {
           handled: true,
-          replyText: `📢 Рассылка запущена для всех активных пользователей.`
+          replyText: `📢 Подготовлена рассылка: «${msg}».\nТребуется подтверждение операции: ID \`${hitl.actionId}\`.`,
+          extra: {
+            attachments: [
+              {
+                type: 'inline_keyboard',
+                payload: {
+                  buttons: [
+                    [
+                      { type: 'callback', text: '🚀 Запустить рассылку', payload: `approve_${hitl.actionId}` },
+                      { type: 'callback', text: 'Отмена', payload: `reject_${hitl.actionId}` }
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
         };
       }
 
       return {
         handled: true,
-        replyText: '👑 **Команды администратора**:\n• `/status` — состояние ядра\n• `/broadcast [текст]` — рассылка'
+        replyText: '👑 **Команды владельца**:\n• `/status` — диагностика ядра\n• `/broadcast [текст]` — массовая рассылка'
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

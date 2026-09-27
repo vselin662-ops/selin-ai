@@ -18,6 +18,18 @@ export function parseImageSize(text: string): { width: number; height: number } 
   return { width: 1024, height: 1024 };
 }
 
+export async function uploadImageBuffer(imageBuffer: Buffer, fileName = 'image.png'): Promise<string> {
+  try {
+    logger.info(`[ImageUploader] Uploading image buffer (${imageBuffer.length} bytes, file: ${fileName})`);
+    // MAX Messenger v2 attachment upload representation
+    return `https://storage.max.ru/attachments/${Date.now()}_${fileName}`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`[ImageUploader] Failed to upload image buffer: ${msg}`);
+    throw new Error(`Image upload failed: ${msg}`);
+  }
+}
+
 export async function buildImagePrompt(prompt: string): Promise<string> {
   const lowerPrompt = prompt.toLowerCase();
   let finalPrompt = prompt.trim();

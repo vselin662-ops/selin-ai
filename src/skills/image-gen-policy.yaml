@@ -1,0 +1,9 @@
+skillName: image-gen
+version: "1.0.0"
+allowedRoles:
+  - "*"
+maxResolution: "1024x1024"
+selfCorrectionRetries: 3
+disallowedThemes:
+  - "nsfw"
+  - "violence"

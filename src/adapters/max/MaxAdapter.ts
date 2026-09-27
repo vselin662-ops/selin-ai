@@ -6,18 +6,30 @@ import { MaxWebhookRouter } from './MaxWebhookRouter';
 import { MaxSender } from './services/maxSender';
 import { validateChatId } from './utils/idSanitizer';
 
-// Handlers
+// Handlers (Full 24 Handlers Transformer Chain)
 import { StartHandler } from './handlers/StartHandler';
 import { TenantHandler } from './handlers/TenantHandler';
-import { VoiceHandler } from './handlers/VoiceHandler';
+import { VoiceInputHandler } from './handlers/VoiceInputHandler';
+import { VoiceModeHandler } from './handlers/VoiceModeHandler';
 import { VisionHandler } from './handlers/VisionHandler';
+import { ImageEditHandler } from './handlers/ImageEditHandler';
 import { ImageGenHandler } from './handlers/ImageGenHandler';
+import { PresentationHandler } from './handlers/PresentationHandler';
+import { BookNarrationHandler } from './handlers/BookNarrationHandler';
+import { SubscriptionHandler } from './handlers/SubscriptionHandler';
+import { PaymentHandler } from './handlers/PaymentHandler';
+import { OwnerCommandHandler } from './handlers/OwnerCommandHandler';
 import { BibleHandler } from './handlers/BibleHandler';
 import { SmartPlannerHandler } from './handlers/SmartPlannerHandler';
 import { RAGHandler } from './handlers/RAGHandler';
 import { NavigationHandler } from './handlers/NavigationHandler';
-import { SubscriptionHandler } from './handlers/SubscriptionHandler';
-import { OwnerCommandHandler } from './handlers/OwnerCommandHandler';
+import { CartHandler } from './handlers/CartHandler';
+import { ProfileHandler } from './handlers/ProfileHandler';
+import { ReminderHandler } from './handlers/ReminderHandler';
+import { BriefingHandler } from './handlers/BriefingHandler';
+import { IdentityHandler } from './handlers/IdentityHandler';
+import { CallbackHandler } from './handlers/CallbackHandler';
+import { GuestActivationHandler } from './handlers/GuestActivationHandler';
 import { DefaultLLMHandler } from './handlers/DefaultLLMHandler';
 
 /**
@@ -32,19 +44,31 @@ export class MaxAdapter {
   constructor(selinCore: SelinCore, token?: string) {
     this.token = token || process.env.MAX_BOT_TOKEN || '';
 
-    // Initialize Chain of Responsibility
+    // Initialize Chain of Responsibility (Sorted by priority)
     this.router = new MaxWebhookRouter([
       new StartHandler(),
       new TenantHandler(),
-      new VoiceHandler(),
+      new VoiceInputHandler(),
+      new VoiceModeHandler(),
       new VisionHandler(),
-      new OwnerCommandHandler(),
+      new ImageEditHandler(),
+      new ImageGenHandler(),
+      new PresentationHandler(),
+      new BookNarrationHandler(),
       new SubscriptionHandler(),
+      new PaymentHandler(),
+      new OwnerCommandHandler(),
       new BibleHandler(),
       new SmartPlannerHandler(),
       new RAGHandler(),
       new NavigationHandler(),
-      new ImageGenHandler(),
+      new CartHandler(),
+      new ProfileHandler(),
+      new ReminderHandler(),
+      new BriefingHandler(),
+      new IdentityHandler(),
+      new CallbackHandler(),
+      new GuestActivationHandler(),
       new DefaultLLMHandler(selinCore)
     ]);
   }
@@ -127,5 +151,9 @@ export class MaxAdapter {
     extra?: Record<string, unknown>
   ): Promise<boolean> {
     return this.sendToUser(chatId, text, { extra });
+  }
+
+  public async synthesizeAndSendVoice(chatId: string | number, text: string): Promise<boolean> {
+    return this.sendVoice(chatId, text);
   }
 }

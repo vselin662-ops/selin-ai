@@ -1,0 +1,7 @@
+skillName: bible-access
+version: "1.0.0"
+allowedRoles:
+  - "*"
+translation: "synodal"
+cacheTtlDays: 30
+voiceEnabledByDefault: true

@@ -3,7 +3,7 @@ import { redisService } from '../../../services/RedisService';
 import { logger } from '../../../logger';
 
 const IN_MEMORY_DEDUP = new Map<string, number>();
-const TTL_SECONDS = 300; // 5 minutes deduplication window
+const TTL_SECONDS = 600; // 10 minutes deduplication window
 
 /**
  * DeduplicationStore: checks if a message/update ID has already been processed.
@@ -46,5 +46,18 @@ export class DeduplicationStore {
     }
 
     return false;
+  }
+
+  public static async markProcessed(key: string): Promise<void> {
+    await this.isDuplicate(key);
+  }
+
+  public static async cleanup(): Promise<void> {
+    const now = Date.now();
+    for (const [k, ts] of IN_MEMORY_DEDUP.entries()) {
+      if (now - ts > TTL_SECONDS * 1000) {
+        IN_MEMORY_DEDUP.delete(k);
+      }
+    }
   }
 }

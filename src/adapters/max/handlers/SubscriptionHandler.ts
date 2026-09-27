@@ -1,11 +1,13 @@
 // src/adapters/max/handlers/SubscriptionHandler.ts
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
-import { getSubscription, activateSubscription } from '../../../fintech/subscriptions';
+import { getSubscription } from '../../../fintech/subscriptions';
+import { HITLEngine } from '../../../engines/HITLEngine';
+import { SemanticGovernance } from '../../../engines/SemanticGovernance';
 
 export class SubscriptionHandler implements IMessageHandler {
   public readonly name = 'SubscriptionHandler';
-  public readonly priority = 60;
+  public readonly priority = 65;
 
   public canHandle(ctx: HandlerContext): boolean {
     const text = ctx.lowerText;

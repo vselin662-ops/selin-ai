@@ -3,10 +3,11 @@ import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
 import { ScriptureService } from '../../../services/bible/ScriptureService';
 import { getPlanDaySummary } from '../../../services/bible/bibleService';
+import { DeepSearchEngine } from '../../../engines/DeepSearchEngine';
 
 export class BibleHandler implements IMessageHandler {
   public readonly name = 'BibleHandler';
-  public readonly priority = 70;
+  public readonly priority = 80;
 
   public canHandle(ctx: HandlerContext): boolean {
     const text = ctx.lowerText;
@@ -27,7 +28,7 @@ export class BibleHandler implements IMessageHandler {
     try {
       const text = ctx.lowerText;
 
-      // 1. Reading passage / verse / chapter
+      // 1. Reading passage / verse / chapter with DeepSearch
       if (
         text.startsWith('прочитай ') ||
         text.startsWith('/bible ') ||

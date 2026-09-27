@@ -1,3 +1,4 @@
+// src/middleware/rateLimit.ts
 import rateLimit from "express-rate-limit";
 import { metrics } from "../metrics";
 
@@ -52,6 +53,28 @@ export const webhookLimiter = rateLimit({
   },
   message: {
     error: "Webhook rate limit exceeded."
+  }
+});
+
+/**
+ * Ограничение на вход в панель администратора: максимум 3 попытки в минуту
+ */
+export const adminLoginLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 min
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  keyGenerator: (req) => {
+    return req.ip || (req.headers["x-forwarded-for"] as string) || "127.0.0.1";
+  },
+  handler: (req, res, next, options) => {
+    metrics.incrementCounter("rate_limit_hits_total", { limiter: "adminLoginLimiter" });
+    res.status(options.statusCode).json(options.message);
+  },
+  message: {
+    error: "Too Many Login Attempts",
+    message: "Превышено максимальное число попыток входа (3 в минуту). Пожалуйста, подождите."
   }
 });
 

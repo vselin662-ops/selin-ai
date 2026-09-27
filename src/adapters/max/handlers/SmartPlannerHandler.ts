@@ -2,10 +2,11 @@
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
 import { smartPlannerService } from '../../../services/SmartPlanner';
+import { CascadeEngine } from '../../../engines/CascadeEngine';
 
 export class SmartPlannerHandler implements IMessageHandler {
   public readonly name = 'SmartPlannerHandler';
-  public readonly priority = 80;
+  public readonly priority = 85;
 
   public canHandle(ctx: HandlerContext): boolean {
     const text = ctx.lowerText;

@@ -1,0 +1,10 @@
+skillName: owner-commands
+version: "1.0.0"
+allowedRoles:
+  - "owner"
+hitlRequiredForBroadcast: true
+commands:
+  - "/status"
+  - "/broadcast"
+  - "/pronounce"
+  - "/metrics"

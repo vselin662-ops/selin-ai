@@ -159,7 +159,7 @@ aiRouter.post("/ai/switch", (req, res) => {
 });
 
 // 8. AI Agent Status and Queue Management
-aiRouter.get(["/ai/agents/status", "/agents/status"], (req, res) => {
+aiRouter.get(["/ai/agents/status", "/agents/status", "/orchestrator/status"], (req, res) => {
   try {
     const data = agentQueueService.getAgentsStatus();
     return res.json({ success: true, ...data });

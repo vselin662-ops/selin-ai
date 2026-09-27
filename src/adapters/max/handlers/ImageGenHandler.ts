@@ -1,15 +1,18 @@
 // src/adapters/max/handlers/ImageGenHandler.ts
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
+import { ImagePipelineEngine } from '../../../engines/ImagePipelineEngine';
+import { SelfCorrectionEngine } from '../../../engines/SelfCorrectionEngine';
 
 export class ImageGenHandler implements IMessageHandler {
   public readonly name = 'ImageGenHandler';
-  public readonly priority = 110;
+  public readonly priority = 50;
 
   public canHandle(ctx: HandlerContext): boolean {
     const text = ctx.lowerText;
     return (
       text.startsWith('/image ') ||
+      text.startsWith('/draw ') ||
       text.startsWith('нарисуй ') ||
       text.startsWith('создай картинку ') ||
       text.startsWith('сгенерируй фото ')
@@ -19,7 +22,7 @@ export class ImageGenHandler implements IMessageHandler {
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
     try {
       const prompt = ctx.text
-        .replace(/^(?:\/image|нарисуй|создай картинку|сгенерируй фото)\s*/i, '')
+        .replace(/^(?:\/image|\/draw|нарисуй|создай картинку|сгенерируй фото)\s*/i, '')
         .trim();
 
       if (!prompt) {
@@ -29,8 +32,11 @@ export class ImageGenHandler implements IMessageHandler {
         };
       }
 
-      const encoded = encodeURIComponent(prompt);
-      const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true`;
+      const imageUrl = await ImagePipelineEngine.generateImage({
+        prompt,
+        width: 1024,
+        height: 1024
+      });
 
       return {
         handled: true,

@@ -100,6 +100,23 @@ export interface IMessageHandler {
   handle(ctx: HandlerContext): Promise<HandlerResult>;
 }
 
+export interface EngineContext {
+  chatId: string;
+  userId?: string;
+  tenantId?: string;
+  action: string;
+  payload: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface EngineResult<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  code?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface SendMessageOptions {
   voice?: boolean;
   attachments?: unknown[];
