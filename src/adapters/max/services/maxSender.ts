@@ -45,20 +45,21 @@ export class MaxSender {
       return false;
     }
 
-    // 1. If voice requested and text exists, synthesize and send voice first
-    if (voice && text) {
-      try {
-        await this.sendVoiceMessage(chatId, text, token);
-      } catch (voiceErr: unknown) {
-        const msg = voiceErr instanceof Error ? voiceErr.message : String(voiceErr);
-        logger.warn(`[MaxSender] Voice synthesis failed for chat ${chatId}: ${msg}. Falling back to text only.`);
-      }
+    // 1. Send text message immediately
+    let sendSuccess = true;
+    if (text) {
+      sendSuccess = await this.splitAndSend(chatId, text, token, extra);
     }
 
-    // 2. Send text message (split if exceeds max length)
-    if (text) {
-      return this.splitAndSend(chatId, text, token, extra);
+    // 2. If voice requested, synthesize and send voice asynchronously without stalling
+    if (voice && text) {
+      this.sendVoiceMessage(chatId, text, token).catch((voiceErr: unknown) => {
+        const msg = voiceErr instanceof Error ? voiceErr.message : String(voiceErr);
+        logger.warn(`[MaxSender] Voice synthesis error for chat ${chatId}: ${msg}`);
+      });
     }
+
+    return sendSuccess;
 
     // 3. Extra only (e.g. keyboards or actions without text body)
     if (extra) {

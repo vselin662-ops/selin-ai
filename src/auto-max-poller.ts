@@ -207,25 +207,24 @@ export async function poll(): Promise<void> {
               console.log(`[AUTO-MAX-POLLER] Got Message: ${updatesList.length} update(s) received`);
 
               for (const update of updatesList) {
-                // 1. Process directly in-process if handler is registered
+                // 1. Process update (prefer in-process handler, fallback to webhook)
                 if (pollerHandler) {
                   try {
                     await pollerHandler(update);
                   } catch (handlerErr) {
                     console.error('[AUTO-MAX-POLLER] In-process handler error:', handlerErr);
                   }
-                }
+                } else {
+                  // Fallback to internal webhook if handler not registered
+                  const port = process.env.PORT || 3000;
+                  const forwardPayload = JSON.stringify(update);
 
-                // 2. Also forward to internal webhook endpoint for consistency & logging
-                const port = process.env.PORT || 3000;
-                const forwardPayload = JSON.stringify(update);
-
-                forwardToWebhook(`http://127.0.0.1:${port}/api/max/webhook`, forwardPayload).catch(() => {
-                  // Fallback to localhost if 127.0.0.1 fails
-                  forwardToWebhook(`http://localhost:${port}/api/max/webhook`, forwardPayload).catch((forwardErr) => {
-                    console.error('[AUTO-MAX-POLLER] Forward error:', forwardErr);
+                  forwardToWebhook(`http://127.0.0.1:${port}/api/max/webhook`, forwardPayload).catch(() => {
+                    forwardToWebhook(`http://localhost:${port}/api/max/webhook`, forwardPayload).catch((forwardErr) => {
+                      console.error('[AUTO-MAX-POLLER] Forward error:', forwardErr);
+                    });
                   });
-                });
+                }
               }
             }
           } catch (parseErr) {

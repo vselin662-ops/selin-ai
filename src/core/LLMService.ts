@@ -11,7 +11,7 @@ import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || 'ollama';
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENROUTER_API_KEY ? 'openrouter' : (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama')));
 const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
 const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];
@@ -426,12 +426,21 @@ export function markFail(provider: string, error?: any) {
 
 export function isProviderConfigured(provider: string): boolean {
   if (provider === 'ollama') {
-    return true; // 100% суверенное локальное ядро на ВМ
+    return true; // Локальное ядро на ВМ
+  }
+  if (provider === 'groq') {
+    return !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10 && !process.env.GROQ_API_KEY.includes('your_'));
+  }
+  if (provider === 'openrouter') {
+    return !!(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.length > 10 && !process.env.OPENROUTER_API_KEY.includes('your_'));
+  }
+  if (provider === 'gemini') {
+    return !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10 && !process.env.GEMINI_API_KEY.includes('your_'));
   }
   if (provider === 'cloudru') {
-    return !!process.env.CLOUDRU_API_KEY; // Резервный шлюз Cloud.ru (приветственный грант)
+    return !!process.env.CLOUDRU_API_KEY;
   }
-  return false; // Зарубежные провайдеры отключены в российском контуре
+  return false;
 }
 
 export async function runCanaryCheck() {
@@ -1001,10 +1010,13 @@ ${identityBlock}
     let responseText: string | null = null;
     let successfulProvider: string | null = null;
 
-    // Sovereign Russian LLM Chain: Ollama (local on VM) -> Cloud.ru Foundation Models (via Grant)
+    // Hybrid LLM Chain: Groq (ultra-fast) -> OpenRouter / Gemini -> Cloud.ru -> Ollama (local)
     const allProviders = [
-      { name: 'ollama', call: () => this.callOllama(messages) },
-      { name: 'cloudru', call: () => this.callCloudRU(messages) }
+      { name: 'groq', call: () => this.callGroq(messages) },
+      { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
+      { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
+      { name: 'cloudru', call: () => this.callCloudRU(messages) },
+      { name: 'ollama', call: () => this.callOllama(messages) }
     ];
 
     // Sort providers: preferred PRIMARY_PROVIDER goes first

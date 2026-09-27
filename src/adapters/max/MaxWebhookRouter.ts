@@ -25,6 +25,9 @@ export class MaxWebhookRouter {
    */
   public async route(payload: MaxWebhookPayload): Promise<boolean> {
     const rawMid =
+      payload.message?.body?.mid ||
+      payload.body?.message?.body?.mid ||
+      payload.message?.body?.seq ||
       payload.mid ||
       payload.body?.mid ||
       payload.body?.seq ||
