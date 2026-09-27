@@ -105,6 +105,10 @@ export class MaxSender {
         logger.error(`[MaxSender] Failed to send message chunk ${i + 1}/${chunks.length} to chat ${chatId}`);
         return false;
       }
+      // БАГ 2: Пауза 800мс между чанками при последовательной отправке
+      if (!isLast) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
     }
     return true;
   }

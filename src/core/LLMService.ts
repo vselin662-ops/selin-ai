@@ -1647,7 +1647,7 @@ ${identityBlock}
             model,
             messages: formattedMessages,
             temperature: 0.7,
-            max_tokens: 300,
+            max_tokens: 2048,
             stream: false
           }),
           signal: AbortSignal.timeout(60000)
@@ -1679,8 +1679,8 @@ ${identityBlock}
             stream: false,
             keep_alive: "24h",
             options: {
-              num_predict: 300,
-              num_ctx: 1024,
+              num_predict: 2048,
+              num_ctx: 4096,
               temperature: 0.7
             }
           }),

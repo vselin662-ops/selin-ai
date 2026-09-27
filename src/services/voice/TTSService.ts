@@ -12,6 +12,8 @@ import { normalizeForSpeech, chunkText, sanitizeForTTS, speakable } from '../../
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { synthesizeWithGroq, getCachedStaticAudio, saveCachedStaticAudio } from '../tts/groq-tts';
 
+import { synthesizeWithYandex } from './yandex-tts';
+
 function escapeXml(unsafe: string): string {
   return unsafe.replace(/[<>&'"]/g, (c) => {
     switch (c) {
@@ -258,19 +260,36 @@ export class TTSService {
     let audioBuffer: Buffer | null = null;
     let contentType = 'audio/mpeg';
 
-    // Попытка 1: MsEdgeTTS library (WebSocket) — наиболее стабильная и стандартная
-    try {
-      const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("MsEdgeTTS connection timeout (15s)")), 15000);
-      });
-      audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
-      if (audioBuffer) {
-        contentType = 'audio/mpeg';
-        ttsRequestsTotal.inc({ engine: 'edge-library' });
+    // Попытка 0: Yandex Cloud SpeechKit TTS (наивысший приоритет, если настроен API-ключ)
+    if (process.env.YANDEX_API_KEY) {
+      try {
+        const isMale = voice.toLowerCase().includes('dmitry');
+        audioBuffer = await synthesizeWithYandex(cleanText, isMale);
+        if (audioBuffer) {
+          contentType = 'audio/mpeg';
+          ttsRequestsTotal.inc({ engine: 'yandex' });
+          logger.info(`🇷🇺 [TTSService] Yandex TTS completed successfully`);
+        }
+      } catch (err: any) {
+        logger.warn(`⚠️ [TTSService] Yandex TTS notice: ${err?.message || err}`);
       }
-    } catch (err: any) {
-      logger.warn(`⚠️ [TTSService] Edge TTS library synthesis notice: ${err?.message || err}`);
+    }
+
+    // Попытка 1: MsEdgeTTS library (WebSocket) — наиболее стабильная и стандартная
+    if (!audioBuffer) {
+      try {
+        const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("MsEdgeTTS connection timeout (15s)")), 15000);
+        });
+        audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
+        if (audioBuffer) {
+          contentType = 'audio/mpeg';
+          ttsRequestsTotal.inc({ engine: 'edge-library' });
+        }
+      } catch (err: any) {
+        logger.warn(`⚠️ [TTSService] Edge TTS library synthesis notice: ${err?.message || err}`);
+      }
     }
 
     // Попытка 2: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)

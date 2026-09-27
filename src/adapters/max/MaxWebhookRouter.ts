@@ -113,8 +113,10 @@ export class MaxWebhookRouter {
                 extra: result.extra
               });
             }
-            return true;
           }
+          // БАГ 1: Прерываем выполнение цепочки СРАЗУ после первого совпадения,
+          // независимо от результата handler.handle(context).
+          return true;
         }
       } catch (handlerErr: unknown) {
         const msg = handlerErr instanceof Error ? handlerErr.message : String(handlerErr);
