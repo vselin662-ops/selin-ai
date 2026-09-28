@@ -45,21 +45,15 @@ export class MaxSender {
       return false;
     }
 
-    // 1. Send text message immediately
-    let sendSuccess = true;
-    if (text) {
-      sendSuccess = await this.splitAndSend(chatId, text, token, extra);
-    }
-
-    // 2. If voice requested, synthesize and send voice asynchronously without stalling
+    // 1. Если запрошен голос — отправляем ИСКЛЮЧИТЕЛЬНО голосовое сообщение без текста
     if (voice && text) {
-      this.sendVoiceMessage(chatId, text, token).catch((voiceErr: unknown) => {
-        const msg = voiceErr instanceof Error ? voiceErr.message : String(voiceErr);
-        logger.warn(`[MaxSender] Voice synthesis error for chat ${chatId}: ${msg}`);
-      });
+      return this.sendVoiceMessage(chatId, text, token);
     }
 
-    return sendSuccess;
+    // 2. Если голос не запрошен — отправляем чисто текстовое сообщение
+    if (text) {
+      return this.splitAndSend(chatId, text, token, extra);
+    }
 
     // 3. Extra only (e.g. keyboards or actions without text body)
     if (extra) {

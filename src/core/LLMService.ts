@@ -1584,43 +1584,55 @@ ${identityBlock}
       throw new Error("CLOUDRU_API_KEY is not configured");
     }
 
-    const authUrl = process.env.CLOUDRU_BASE_URL || "https://api.cloud.ru/v1/chat/completions";
-    const model = process.env.CLOUDRU_MODEL || "gigachat-pro";
+    const candidateUrls = [
+      process.env.CLOUDRU_BASE_URL,
+      "https://foundation-models.api.cloud.ru/v1/chat/completions",
+      "https://api.cloud.ru/ai/v1/chat/completions",
+      "https://api.cloud.ru/v1/chat/completions"
+    ].filter(Boolean) as string[];
+
+    const model = process.env.CLOUDRU_MODEL || "meta-llama/Llama-3-70B-Instruct";
 
     const formattedMessages = messages.map(msg => ({
       role: msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user'),
       content: msg.content
     }));
 
-    try {
-      const response = await fetch(authUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model,
-          messages: formattedMessages,
-          temperature: 0.7
-        }),
-        signal: AbortSignal.timeout(30000)
-      });
+    let lastErr: any = null;
+    for (const url of candidateUrls) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key.trim()}`,
+            'Content-Type': 'application/json',
+            'X-Api-Key': key.trim()
+          },
+          body: JSON.stringify({
+            model,
+            messages: formattedMessages,
+            temperature: 0.7,
+            max_tokens: 2048
+          }),
+          signal: AbortSignal.timeout(20000)
+        });
 
-      if (!response.ok) {
-        throw new Error(`Cloud.ru API HTTP ${response.status}`);
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text) {
+            logger.info(`🇷🇺 [Cloud.ru] Responded successfully from ${url} using model ${model}`);
+            return sanitize(text);
+          }
+        } else {
+          lastErr = new Error(`HTTP ${response.status} from ${url}`);
+        }
+      } catch (err: any) {
+        lastErr = err;
       }
-
-      const data: any = await response.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) {
-        throw new Error("Empty response from Cloud.ru API");
-      }
-      logger.info(`🇷🇺 [Cloud.ru] Responded successfully using model ${model}`);
-      return sanitize(text);
-    } catch (err: any) {
-      throw new Error(`Cloud.ru API failed: ${err?.message || err}`);
     }
+
+    throw new Error(`Cloud.ru API failed: ${lastErr?.message || lastErr}`);
   }
 
   private async callOllama(messages: any[]): Promise<string> {
@@ -1634,13 +1646,10 @@ ${identityBlock}
 
     const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
     
-    // Оптимизируем длину системного промпта для локальной 3B модели для мгновенного инференса на CPU
+    // Передаем системный промпт и контекст полностью для высокой эрудиции и точности
     const formattedMessages = messages.map(msg => {
       const role = msg.role === 'system' ? 'system' : (msg.role === 'assistant' || msg.role === 'model' ? 'assistant' : 'user');
-      let content = String(msg.content || '');
-      if (role === 'system' && content.length > 800) {
-        content = content.substring(0, 800);
-      }
+      const content = String(msg.content || '');
       return { role, content };
     });
 

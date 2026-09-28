@@ -31,7 +31,7 @@ export class DefaultLLMHandler implements IMessageHandler {
       return {
         handled: true,
         replyText,
-        voiceText: replyText
+        voiceText: ctx.isVoiceInput ? replyText : undefined
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
