@@ -11,7 +11,7 @@ import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENROUTER_API_KEY ? 'openrouter' : (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama')));
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || (process.env.CLOUDRU_API_KEY ? 'cloudru' : (process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENROUTER_API_KEY ? 'openrouter' : (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'))));
 const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
 const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];

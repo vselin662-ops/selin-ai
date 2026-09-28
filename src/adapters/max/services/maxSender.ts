@@ -165,7 +165,7 @@ export class MaxSender {
   }
 
   /**
-   * Synthesize audio and send voice message.
+   * Synthesize audio and send voice message to MAX.
    */
   public static async sendVoiceMessage(chatId: string, rawText: string, token: string): Promise<boolean> {
     const voiceText = prepareVoiceText(rawText);
@@ -178,7 +178,30 @@ export class MaxSender {
     }
 
     logger.info(`[MaxSender] Voice buffer prepared (${audioBuffer.length} bytes) for chat ${chatId}`);
-    return true;
+
+    const numericId = parseInt(chatId, 10);
+    const base64Audio = audioBuffer.toString('base64');
+    
+    // MAX API voice payload format
+    const bodyObj: Record<string, unknown> = {
+      chat_id: Number.isFinite(numericId) ? numericId : chatId,
+      recipient: {
+        chat_id: Number.isFinite(numericId) ? numericId : chatId
+      },
+      attachments: [
+        {
+          type: 'audio',
+          payload: {
+            data: `data:audio/mp3;base64,${base64Audio}`
+          }
+        }
+      ]
+    };
+
+    const payload = JSON.stringify(bodyObj);
+    const queryPath = `/messages?chat_id=${encodeURIComponent(chatId)}`;
+    const status = await this.postJsonRequest(queryPath, payload, token);
+    return status >= 200 && status < 300;
   }
 
   /**
