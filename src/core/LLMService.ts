@@ -1586,6 +1586,7 @@ ${identityBlock}
 
     const candidateUrls = [
       process.env.CLOUDRU_BASE_URL,
+      "https://api-inference.cloud.ru/v1/chat/completions",
       "https://foundation-models.api.cloud.ru/v1/chat/completions",
       "https://api.cloud.ru/ai/v1/chat/completions",
       "https://api.cloud.ru/v1/chat/completions"
@@ -1659,37 +1660,7 @@ ${identityBlock}
       const cleanBase = baseUrl.replace(/\/$/, '');
       logger.info(`🦙 [Ollama] Dispatching to ${cleanBase} (model: ${model}, msgs: ${formattedMessages.length})...`);
 
-      // 1. Попытка через стандартный OpenAI-совместимый v1/chat/completions с оптимизацией скорости
-      try {
-        const response = await fetch(`${cleanBase}/v1/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            messages: formattedMessages,
-            temperature: 0.7,
-            max_tokens: 2048,
-            stream: false
-          }),
-          signal: AbortSignal.timeout(60000)
-        });
-
-        if (response.ok) {
-          const data: any = await response.json();
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text) {
-            logger.info(`🦙 [Ollama:v1] Responded successfully from ${cleanBase} using model ${model}`);
-            return sanitize(text);
-          }
-        } else {
-          logger.warn(`⚠️ [Ollama:v1] HTTP ${response.status} from ${cleanBase}`);
-        }
-      } catch (err: any) {
-        lastError = err;
-        logger.warn(`⚠️ [Ollama:v1] Probe error on ${cleanBase}: ${err?.message || err}`);
-      }
-
-      // 2. Попытка через нативный Ollama эндпоинт /api/chat с num_predict и keep_alive для максимальной скорости
+      // 1. Попытка через нативный Ollama эндпоинт /api/chat с keep_alive для максимальной скорости инференса
       try {
         const response = await fetch(`${cleanBase}/api/chat`, {
           method: 'POST',
@@ -1700,12 +1671,13 @@ ${identityBlock}
             stream: false,
             keep_alive: "24h",
             options: {
-              num_predict: 2048,
-              num_ctx: 4096,
-              temperature: 0.7
+              num_predict: 1024,
+              num_ctx: 2048,
+              temperature: 0.7,
+              num_thread: 4
             }
           }),
-          signal: AbortSignal.timeout(60000)
+          signal: AbortSignal.timeout(120000)
         });
 
         if (response.ok) {
@@ -1721,6 +1693,36 @@ ${identityBlock}
       } catch (err: any) {
         lastError = err;
         logger.warn(`⚠️ [Ollama:native] Probe error on ${cleanBase}: ${err?.message || err}`);
+      }
+
+      // 2. Фолбэк через v1/chat/completions
+      try {
+        const response = await fetch(`${cleanBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: formattedMessages,
+            temperature: 0.7,
+            max_tokens: 1024,
+            stream: false
+          }),
+          signal: AbortSignal.timeout(120000)
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text) {
+            logger.info(`🦙 [Ollama:v1] Responded successfully from ${cleanBase} using model ${model}`);
+            return sanitize(text);
+          }
+        } else {
+          logger.warn(`⚠️ [Ollama:v1] HTTP ${response.status} from ${cleanBase}`);
+        }
+      } catch (err: any) {
+        lastError = err;
+        logger.warn(`⚠️ [Ollama:v1] Probe error on ${cleanBase}: ${err?.message || err}`);
       }
     }
 
