@@ -12,7 +12,7 @@
 
 export * from './voice/TTSService';
 export * from './voice/stt.service';
-export * from './flight.service';
+export * from './FlightService';
 export * from './security/rag-protection';
 export * from './security/jailbreak-detector';
 export * from './security/canary-tokens';

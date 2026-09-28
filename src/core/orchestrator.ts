@@ -1,9 +1,5 @@
 import type { Adapter, InputEvent, VoiceInputEvent, SensorEvent, RobotAction } from '../adapters/base.adapter';
-import { detectIntent, type Intent } from './intent-engine';
 import { memorySystem, type Memory } from './memory';
-import { decisionEngine, type Action } from './decision-engine';
-import { emotionEngine } from './emotion-engine';
-import { planner } from './planner';
 import { ttsService, synthesizeForChat } from '../services/voice/TTSService';
 import { processMessage as processLanguageMessage, startLesson } from '../modules/language/language.module';
 import { businessModule } from '../modules/business';
@@ -16,6 +12,20 @@ import { financeModule } from '../modules/finance';
 import { socialModule } from '../modules/social';
 import { robotModule } from '../modules/robot';
 import { logger } from '../logger';
+import { llmService } from './LLMService';
+
+export interface Intent {
+  type: string;
+  confidence: number;
+  entities: Record<string, any>;
+  raw_text: string;
+}
+
+export interface Action {
+  type: string;
+  payload: Record<string, any>;
+  priority: number;
+}
 
 /**
  * Главный Оркестратор автономного интеллекта Selin AI.
@@ -53,50 +63,17 @@ export class Orchestrator {
   async processInput(event: InputEvent): Promise<string> {
     logger.info('[Orchestrator] Processing input event', { adapter: event.adapterName, user: event.userId, text: event.text });
 
-    // 1. Понять контекст и намерение
     const context = await memorySystem.getContext(event.tenantId);
     memorySystem.addMessage(event.tenantId, 'user', event.text);
-    const intent = await detectIntent(event.text, context);
 
-    // 2. Проанализировать эмоции
-    const emotion = await emotionEngine.analyze(event.text);
+    const primaryResponse = await llmService.smartCall(event.userId || event.tenantId, event.text);
 
-    // 3. Вспомнить релевантное из долгосрочной памяти
-    const memories = await memorySystem.recall(event.text, event.tenantId);
-
-    const fullMemory: Memory = {
-      shortTerm: (context.lastMessages || []).map((m) => ({ role: m.role as any, content: m.content, timestamp: Date.now() })),
-      longTerm: memories,
-      context: { ...context, emotionState: emotion.user_emotion },
-    };
-
-    // 4. Принять решение
-    const actions = await decisionEngine.decide(intent, fullMemory, context);
-
-    let primaryResponse = '';
-
-    // 5. Выполнить действия
-    for (const action of actions) {
-      const response = await this.executeAction(action, event, intent, fullMemory);
-      if (response && !primaryResponse) {
-        primaryResponse = response;
-      }
-    }
-
-    if (!primaryResponse) {
-      primaryResponse = await this.routeToModule(intent, fullMemory);
-    }
-
-    // Запомнить ассистентский ответ
     memorySystem.addMessage(event.tenantId, 'assistant', primaryResponse);
 
-    // 6. Запомнить важное в долгосрочную память
-    await memorySystem.remember(event.tenantId, {
-      type: 'interaction',
-      content: `User: ${event.text.substring(0, 100)} | Selin: ${primaryResponse.substring(0, 100)}`,
-      importance: intent.confidence > 0.8 ? 0.8 : 0.4,
-      createdAt: Date.now(),
-    });
+    const adapter = this.adapters.get(event.adapterName);
+    if (adapter) {
+      await adapter.sendText(event.userId, primaryResponse);
+    }
 
     return primaryResponse;
   }
