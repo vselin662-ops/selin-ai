@@ -179,6 +179,23 @@ async function searchDuckDuckGoApi(query: string): Promise<WebSearchResult[]> {
   return results;
 }
 
+async function searchWikipediaRu(query: string): Promise<WebSearchResult[]> {
+  try {
+    const url = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1&srlimit=4`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    const list = data?.query?.search || [];
+    return list.map((item: any) => ({
+      title: item.title,
+      url: `https://ru.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+      snippet: cleanHtml(item.snippet || '')
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function searchWeb(query: string): Promise<WebSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -192,13 +209,20 @@ export async function searchWeb(query: string): Promise<WebSearchResult[]> {
     logger.warn(`⚠️ [WebSearch] Engine 1 (HTML) failed: ${err?.message || err}, falling back to Engine 2`);
   }
 
-  // Движок 2: DuckDuckGo JSON API (если Движок 1 вернул пусто или упал)
+  // Движок 2: DuckDuckGo JSON API
   if (results.length === 0) {
     try {
       results = await searchDuckDuckGoApi(trimmed);
     } catch (err: any) {
-      logger.error(`❌ [WebSearch] Engine 2 (API) failed: ${err?.message || err}`);
+      logger.warn(`⚠️ [WebSearch] Engine 2 (API) failed: ${err?.message || err}`);
     }
+  }
+
+  // Движок 3: Резервный поиск энциклопедии и фактов без блокировок
+  if (results.length === 0) {
+    try {
+      results = await searchWikipediaRu(trimmed);
+    } catch {}
   }
 
   const topResults = results.slice(0, 5);
