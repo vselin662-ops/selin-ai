@@ -363,33 +363,8 @@ export class SelinCore {
       logger.warn(`⚠️ [SelinCore] Error analyzing feedback: ${feedbackErr}`);
     }
 
-    // === ЕДИНОРАЗОВЫЙ ОНБОРДИНГ ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ ===
-    const OWNER = String(process.env.OWNER_CHAT_ID || '').trim();
-    const isOwner = OWNER !== '' && String(context.chatId).trim() === OWNER;
-    const bypassOnboardingEnv = process.env.BYPASS_ONBOARDING === 'true' || process.env.BYPASS_ONBOARDING === '1';
-
-    if (!isOwner && !bypassOnboardingEnv) {
-      try {
-        const { handleOnboarding } = await import("../services/ai/ProfileService");
-        const onboardingResult = await handleOnboarding(context.chatId, effectiveText);
-        if (onboardingResult.handled && onboardingResult.replyText) {
-          const isVoiceResponse = context.isVoice ||
-            context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
-            context.voiceMode === VoiceMode.VOICE_TO_VOICE;
-
-          const { recordLastResponse } = await import("../services/ai/PersonalityService");
-          recordLastResponse(context.chatId, onboardingResult.replyText);
-
-          return {
-            text: onboardingResult.replyText,
-            confidence: 1.0,
-            voice: isVoiceResponse ? { format: 'ogg' } : undefined
-          };
-        }
-      } catch (onboardingErr) {
-        logger.error(`❌ [SelinCore] Error in onboarding flow: ${onboardingErr}`);
-      }
-    }
+    // === ЕДИНОРАЗОВЫЙ ОНБОРДИНГ ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ (ПОЛНОСТЬЮ ОТКЛЮЧЕН ДЛЯ ПРЕДОТВРАЩЕНИЯ ЗАГЛУШЕК) ===
+    const isOwner = false; // Байпас онбординга для всех для стабильности прямого инференса
 
     // 2. Определение типа задачи
     const taskType = this.detectTaskType(effectiveText, context.isVoice);
