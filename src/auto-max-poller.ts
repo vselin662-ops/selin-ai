@@ -251,12 +251,12 @@ export async function poll(): Promise<void> {
   }
 }
 
-// Poll every 6 seconds if token exists
+// Poll every 1.5 seconds if token exists (fast responsiveness)
 const pollInterval = setInterval(() => {
   if (process.env.MAX_BOT_TOKEN) {
     poll().catch(() => {});
   }
-}, 6000);
+}, 1500);
 pollInterval.unref();
 
 function clearAllSubscriptions(): Promise<void> {

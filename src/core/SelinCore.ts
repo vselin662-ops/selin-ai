@@ -160,8 +160,15 @@ export class SelinCore {
   ): Promise<AIResponse> {
     logger.info(`📨 [SelinCore] processMessage for chat ${context.chatId} (channel: ${context.channel}, isVoice: ${context.isVoice})`);
 
+    // 0. Защита от Prompt Injection и XSS
+    const promptCheck = SecurityGateway.sanitizePrompt(userMessage);
+    if (!promptCheck.safe) {
+      logger.warn(`🛡️ [SecurityGateway] Filtered Prompt Injection from chat ${context.chatId}: "${userMessage.substring(0, 50)}..."`);
+    }
+    const cleanUserMessage = promptCheck.cleaned;
+
     // 1. Проверка wake word
-    const wakeResult = this.detectWakeWord(userMessage);
+    const wakeResult = this.detectWakeWord(cleanUserMessage);
     if (wakeResult.detected && wakeResult.isOnlyWakeWord) {
       return {
         text: wakeResult.confirmationSpeech,
@@ -179,7 +186,7 @@ export class SelinCore {
       };
     }
 
-    const effectiveText = wakeResult.detected ? wakeResult.cleanedText : userMessage;
+    const effectiveText = wakeResult.detected ? wakeResult.cleanedText : cleanUserMessage;
 
     // === INTERCEPT HELP AND MENU COMMANDS ===
     const trimmedHelp = effectiveText.trim().toLowerCase();

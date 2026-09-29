@@ -41,6 +41,41 @@ export class SecurityGateway {
   }
 
   // ==========================================
+  // Защита от Prompt Injection и Jailbreak
+  // ==========================================
+  private static dangerousPromptPatterns: RegExp[] = [
+    /ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions/i,
+    /you\s+are\s+now\s+/i,
+    /system\s*:\s*/i,
+    /<\|im_start\|>/i,
+    /<\|im_end\|>/i,
+    /DAN\s+Mode/i,
+    /jailbreak/i,
+    /disregard\s+(?:all\s+)?rules/i,
+    /забудь\s+(?:все\s+)?(?:предыдущие\s+)?инструкции/i,
+    /ты\s+теперь\s+(?:не\s+селин|другой\s+бот)/i,
+    /действуй\s+как\s+неограниченный\s+ии/i
+  ];
+
+  /**
+   * Санитизирует пользовательский ввод перед отправкой в LLM
+   */
+  public static sanitizePrompt(input: string): { safe: boolean; cleaned: string } {
+    if (!input || typeof input !== 'string') return { safe: true, cleaned: '' };
+    let cleaned = input;
+    let safe = true;
+
+    for (const pattern of this.dangerousPromptPatterns) {
+      if (pattern.test(cleaned)) {
+        safe = false;
+        cleaned = cleaned.replace(pattern, '[FILTERED]');
+      }
+    }
+
+    return { safe, cleaned };
+  }
+
+  // ==========================================
   // 18+ Контроль доступа (ФЗ-436)
   // ==========================================
   private static pendingAdultQuestions: Map<string, { question: string; timestamp: number }> = new Map();

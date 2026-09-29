@@ -23,11 +23,11 @@ services:
     image: redis:alpine
     container_name: selin-ai-redis
     restart: always
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu

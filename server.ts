@@ -93,6 +93,7 @@ export {
 import { startBibleScheduler } from "./src/services/bible/bibleService";
 import { startMorningScheduler } from "./src/services/planning/morningBriefing";
 import { SecurityGateway } from "./src/core/SecurityGateway";
+import helmet from "helmet";
 
 dotenv.config({ override: true });
 process.env.IMAGE_EDIT = "0";
@@ -103,6 +104,15 @@ export const app = express();
 export const PORT = 3000;
 
 app.set("trust proxy", 1);
+
+// Security Headers (Helmet) с поддержкой iframe превью и внешних каналов
+app.use(helmet({
+  contentSecurityPolicy: false,
+  frameguard: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false,
+  crossOriginOpenerPolicy: false
+}));
 
 // 1. Request ID and Metrics Tracking Middleware
 app.use(requestIdMiddleware);

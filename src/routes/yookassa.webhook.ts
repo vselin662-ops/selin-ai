@@ -47,6 +47,16 @@ router.post("/api/payments/yookassa/webhook", async (req: Request, res: Response
         // A. Activate subscription
         activateSubscription(chatId, plan, 30);
 
+        // A.1. Security Audit Log
+        try {
+          const { logSecurityEvent } = await import("../services/security/auditLog");
+          logSecurityEvent({
+            chatId,
+            action: 'payment',
+            metadata: { paymentId, plan, amount }
+          });
+        } catch {}
+
         // B. Log to payments table
         if (sqliteDb && paymentId) {
           sqliteDb.prepare(`

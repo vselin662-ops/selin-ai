@@ -10,17 +10,31 @@ export interface ImageGenerationOptions {
 }
 
 export class ImagePipelineEngine {
+  /**
+   * Конвейер улучшения промпта (Prompt Enhancement)
+   */
+  public static enhancePrompt(shortPrompt: string): string {
+    const raw = shortPrompt.trim();
+    if (!raw) return 'high quality digital art, detailed, 8k resolution';
+    // Если запрос короткий, обогащаем деталями стиля, освещения и качества
+    if (raw.length < 50 && !raw.includes('photorealistic') && !raw.includes('detailed')) {
+      return `${raw}, professional photography, volumetric soft cinematic lighting, highly detailed, photorealistic, 8k resolution`;
+    }
+    return raw;
+  }
+
   public static async generateImage(options: ImageGenerationOptions): Promise<string> {
     const { prompt, width = 1024, height = 1024, style } = options;
+    const enhancedPrompt = this.enhancePrompt(prompt);
 
     const result = await SelfCorrectionEngine.executeWithCorrection<string>(
       async (attempt: number) => {
-        let finalPrompt = prompt.trim();
+        let finalPrompt = enhancedPrompt;
         if (style) {
           finalPrompt += `, ${style}`;
         }
         if (attempt > 1) {
-          finalPrompt += ', high quality, detailed, 8k, photorealistic';
+          finalPrompt += ', award-winning masterpiece, sharp focus, 8k';
         }
 
         const encoded = encodeURIComponent(finalPrompt);

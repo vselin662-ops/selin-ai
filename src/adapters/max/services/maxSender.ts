@@ -165,10 +165,18 @@ export class MaxSender {
     const voiceText = prepareVoiceText(rawText);
     if (!voiceText) return false;
 
-    const audioBuffer = await synthesizeForChat(chatId, voiceText);
+    let audioBuffer: Buffer | null = null;
+    try {
+      audioBuffer = await synthesizeForChat(chatId, voiceText);
+    } catch (ttsErr: unknown) {
+      const msg = ttsErr instanceof Error ? ttsErr.message : String(ttsErr);
+      logger.warn(`[MaxSender] TTS failed: ${msg}`);
+    }
+
+    // Если синтез не удался, отправляем текстом, чтобы сообщение не терялось
     if (!audioBuffer || audioBuffer.length === 0) {
-      logger.warn(`[MaxSender] TTS returned empty buffer for chat ${chatId}`);
-      return false;
+      logger.warn(`[MaxSender] TTS returned empty buffer for chat ${chatId}, falling back to text delivery`);
+      return this.splitAndSend(chatId, rawText, token);
     }
 
     logger.info(`[MaxSender] Voice buffer prepared (${audioBuffer.length} bytes) for chat ${chatId}`);

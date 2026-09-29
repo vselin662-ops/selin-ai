@@ -52,6 +52,54 @@ export class CallbackHandler implements IMessageHandler {
         };
       }
 
+      // === Интерактивные кнопки Плана Победы и Библии ===
+      if (data === 'plan_read_morning' || data === 'plan_read_noon' || data === 'plan_read_evening') {
+        const slotKey = data === 'plan_read_morning' ? 'morning' : data === 'plan_read_noon' ? 'noon' : 'evening';
+        const { buildSlotContent } = await import('../../../services/planning/PlanContentBuilder');
+        const content = await buildSlotContent(ctx.chatId, slotKey);
+        
+        return {
+          handled: true,
+          replyText: content.text,
+          voiceText: content.voiceText
+        };
+      }
+
+      if (data === 'plan_verse_today') {
+        const { getPlanDaySummary } = await import('../../../services/bible/bibleService');
+        const summary = getPlanDaySummary(ctx.chatId, false);
+        return {
+          handled: true,
+          replyText: `📖 **Стих и разбор Плана Победы на сегодня**:\n\n${summary}`,
+          voiceText: summary
+        };
+      }
+
+      if (data === 'bible_psalm_today') {
+        const { ScriptureService } = await import('../../../services/bible/ScriptureService');
+        const psalm = await ScriptureService.randomPsalm(ctx.chatId);
+        if (psalm) {
+          return {
+            handled: true,
+            replyText: `🕊 **${psalm.ref}**\n\n${psalm.text}`,
+            voiceText: `${psalm.ref}. ${psalm.text}`
+          };
+        }
+      }
+
+      if (data === 'bible_menu') {
+        return {
+          handled: true,
+          replyText:
+            '📖 **Священное Писание (Синодальный перевод)**\n\n' +
+            'Напишите название книги и главу/стих, например:\n' +
+            '• `Бытие 1` — первая глава\n' +
+            '• `Иоанна 3:16` — стих\n' +
+            '• `Псалом 22` — псалом пастыря\n' +
+            '• `Матфея 5` — Нагорная проповедь'
+        };
+      }
+
       return {
         handled: true,
         replyText: `🔘 Выбрано действие: ${data}`

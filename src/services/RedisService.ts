@@ -53,6 +53,14 @@ export class RedisService {
     return this.isConnected && this.client !== null;
   }
 
+  public isReady(): boolean {
+    return this.isAvailable();
+  }
+
+  public getClient(): Redis | null {
+    return this.client;
+  }
+
   // Хэширование для ключей
   public hashKey(str: string): string {
     return crypto.createHash('sha256').update(str).digest('hex');
