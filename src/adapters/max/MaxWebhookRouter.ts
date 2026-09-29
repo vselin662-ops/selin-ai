@@ -88,6 +88,19 @@ export class MaxWebhookRouter {
     // 4. Parse attachments
     const attachments = parseAttachments(payload);
 
+    // 4.5. Extract callback data from all MAX API variations
+    const rawCallbackData =
+      payload.callback_data ||
+      payload.body?.callback_data ||
+      payload.body?.payload ||
+      payload.payload?.payload ||
+      payload.payload?.data ||
+      payload.data ||
+      (payload.type === 'callback' ? payload.payload : undefined) ||
+      (payload.event === 'callback' ? payload.payload : undefined) ||
+      undefined;
+    const callbackDataStr = typeof rawCallbackData === 'string' ? rawCallbackData.trim() : undefined;
+
     // 5. Build HandlerContext
     const context: HandlerContext = {
       raw: payload,
@@ -102,8 +115,16 @@ export class MaxWebhookRouter {
       hasLocation: attachments.hasLocation,
       userLat: attachments.latitude,
       userLon: attachments.longitude,
-      callbackData: typeof payload.callback_data === 'string' ? payload.callback_data : undefined,
-      isCallbackUpdate: Boolean(payload.callback_id || payload.callback_data || payload.body?.callback_id)
+      callbackData: callbackDataStr,
+      isCallbackUpdate: Boolean(
+        payload.callback_id ||
+        payload.callback_data ||
+        payload.body?.callback_id ||
+        payload.body?.callback_data ||
+        payload.type === 'callback' ||
+        payload.event === 'callback' ||
+        callbackDataStr
+      )
     };
 
     // 6. Chain of Responsibility execution

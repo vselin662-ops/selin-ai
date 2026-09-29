@@ -6,7 +6,7 @@ import { activateSubscription } from '../../../fintech/subscriptions';
 
 export class CallbackHandler implements IMessageHandler {
   public readonly name = 'CallbackHandler';
-  public readonly priority = 130;
+  public readonly priority = 25; // Высокий приоритет для мгновенной обработки кликов кнопок
 
   public canHandle(ctx: HandlerContext): boolean {
     return ctx.isCallbackUpdate || Boolean(ctx.callbackData);
