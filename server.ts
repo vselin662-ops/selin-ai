@@ -49,6 +49,7 @@ import legalRouter from "./src/routes/legal.routes";
 import plannerRouter from "./src/routes/planner.routes";
 import ragRouter from "./src/routes/rag.routes";
 import bibleRouter from "./src/routes/bible.routes";
+import crmRouter from "./src/routes/crm.routes";
 import { healthRouter } from "./src/routes/health";
 import { adminGuard, adminLoginHandler } from "./src/middleware/adminAuth";
 
@@ -350,6 +351,7 @@ app.use("/api", mcpRouter);
 app.use("/api/planner", plannerRouter);
 app.use("/api/rag", ragRouter);
 app.use("/api/bible", bibleRouter);
+app.use("/api/crm", crmRouter);
 app.use("/api", healthRouter);
 app.use(legalRouter);
 

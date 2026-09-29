@@ -1,42 +1,24 @@
-name: Selin AI Continuous Deployment
+# Automated CI/CD pipeline for Selin AI VM (Production Ready)
+name: Deploy Selin AI to VM
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
   deploy:
-    name: Deploy to Cloud.ru Bare Metal VM
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Deploy via SSH to VM
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy to Remote VM via SSH
+        uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USERNAME || 'ubuntu' }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          passphrase: ${{ secrets.VM_SSH_PASSPHRASE || '' }}
-          port: ${{ secrets.VM_PORT || 22 }}
-          script_stop: true
+          host: ${{ secrets.VM_HOST || secrets.HOST }}
+          username: ${{ secrets.VM_USERNAME || secrets.USERNAME || 'ubuntu' }}
+          key: ${{ secrets.VM_SSH_KEY || secrets.SSH_KEY }}
           script: |
-            echo "🚀 [Deploy] Starting automatic deployment on VM..."
-            cd /services/selin-ai || cd /app || cd ~/selin-ai
-
-            echo "📦 [Deploy] Pulling latest changes from main branch..."
-            git reset --hard HEAD
-            git pull origin main
-
-            echo "🔨 [Deploy] Rebuilding Docker containers without cache..."
-            sudo docker compose down
+            cd /services/selin-ai
+            sudo git reset --hard origin/main
+            sudo git pull origin main
             sudo docker compose build --no-cache selin-ai
-            sudo docker compose up -d
-
-            echo "🧹 [Deploy] Pruning dangling images..."
-            sudo docker image prune -f
-
-            echo "✅ [Deploy] Checking container status..."
-            sudo docker ps --filter "name=selin-ai"
+            sudo docker compose up -d selin-ai

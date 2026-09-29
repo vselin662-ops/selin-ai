@@ -100,6 +100,48 @@ export class CallbackHandler implements IMessageHandler {
         };
       }
 
+      // === Интерактивные кнопки CRM & Маркетинга ===
+      if (data === 'crm_objection_expensive') {
+        const { MarketingCRMService } = await import('../../../services/marketing/MarketingCRMService');
+        const res = await MarketingCRMService.analyzeChatAndAdvise(ctx.chatId, 'Клиент говорит: У вас слишком дорого, мне предлагают дешевле.');
+        return {
+          handled: true,
+          replyText: `🎯 **Отработка возражения «Дорого»**:\n\n${res.bestReply}`
+        };
+      }
+
+      if (data === 'crm_objection_think') {
+        const { MarketingCRMService } = await import('../../../services/marketing/MarketingCRMService');
+        const res = await MarketingCRMService.analyzeChatAndAdvise(ctx.chatId, 'Клиент говорит: Спасибо, я подумаю и напишу позже.');
+        return {
+          handled: true,
+          replyText: `⏳ **Отработка возражения «Я подумаю»**:\n\n${res.bestReply}`
+        };
+      }
+
+      if (data === 'crm_plan_request') {
+        return {
+          handled: true,
+          replyText: '🚀 Чтобы составить индивидуальную стратегию, напишите нишу, например: `маркетинг автосервис` или `маркетинг магазин одежды`.'
+        };
+      }
+
+      if (data === 'crm_list_clients') {
+        const { MarketingCRMService } = await import('../../../services/marketing/MarketingCRMService');
+        const clients = MarketingCRMService.getClients(ctx.chatId);
+        if (clients.length === 0) {
+          return {
+            handled: true,
+            replyText: '📋 У вас пока нет сохраненных клиентов.\nЧтобы добавить клиента, отправьте: `клиент Имя телефон/заметка`.'
+          };
+        }
+        const listText = clients.slice(0, 10).map((c, i) => `${i + 1}. **${c.client_name}** (${c.channel}) — День ${c.day_of_program}`).join('\n');
+        return {
+          handled: true,
+          replyText: `📋 **Ваши клиенты в CRM**:\n\n${listText}`
+        };
+      }
+
       return {
         handled: true,
         replyText: `🔘 Выбрано действие: ${data}`

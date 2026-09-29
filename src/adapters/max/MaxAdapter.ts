@@ -30,6 +30,7 @@ import { BriefingHandler } from './handlers/BriefingHandler';
 import { IdentityHandler } from './handlers/IdentityHandler';
 import { CallbackHandler } from './handlers/CallbackHandler';
 import { GuestActivationHandler } from './handlers/GuestActivationHandler';
+import { MarketingCRMHandler } from './handlers/MarketingCRMHandler';
 import { DefaultLLMHandler } from './handlers/DefaultLLMHandler';
 
 /**
@@ -69,6 +70,7 @@ export class MaxAdapter {
       new IdentityHandler(),
       new CallbackHandler(),
       new GuestActivationHandler(),
+      new MarketingCRMHandler(),
       new DefaultLLMHandler(selinCore)
     ]);
   }
