@@ -9,7 +9,16 @@ export class ProfileHandler implements IMessageHandler {
 
   public canHandle(ctx: HandlerContext): boolean {
     const text = ctx.lowerText;
-    return text === 'мой профиль' || text === '/profile' || text.startsWith('о себе:') || text.startsWith('обо мне:');
+    return (
+      text === 'мой профиль' ||
+      text === '/profile' ||
+      text === 'профиль' ||
+      text === 'мой id' ||
+      text === 'id' ||
+      text === '/id' ||
+      text.startsWith('о себе:') ||
+      text.startsWith('обо мне:')
+    );
   }
 
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
@@ -23,6 +32,16 @@ export class ProfileHandler implements IMessageHandler {
           handled: true,
           replyText: `👤 Информация о вас сохранена: «${info}».`,
           voiceText: 'Ваши данные профиля обновлены.'
+        };
+      }
+
+      const text = ctx.lowerText;
+      if (text === 'мой id' || text === 'id' || text === '/id') {
+        return {
+          handled: true,
+          replyText:
+            `🆔 **Ваш системный ID**: \`${ctx.chatId}\`\n` +
+            `👑 **Статус**: ${ctx.isOwner ? 'Владелец и Создатель (Owner)' : 'Пользователь (User)'}`
         };
       }
 

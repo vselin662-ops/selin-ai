@@ -11,6 +11,8 @@ export class IdentityHandler implements IMessageHandler {
     return (
       text === 'кто ты' ||
       text === 'кто твой создатель' ||
+      text === 'кто тебя создал' ||
+      text === 'чей ты' ||
       text === 'пол модели' ||
       text === 'кто создатель' ||
       text === 'инфо'
@@ -20,16 +22,16 @@ export class IdentityHandler implements IMessageHandler {
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
     try {
       const reply =
-        `🤖 **Я — Селин (Selin AI Sovereign Mega Brain)**.\n\n` +
-        `• **Архитектура**: Суверенная мультиагентная система когнитивной трансформации.\n` +
-        `• **Платформа**: MAX Messenger API v2, Node.js + TypeScript, Ollama (Qwen 2.5).\n` +
-        `• **Безопасность**: Zero-Trust, Model Armor, Cryptographic Audit.\n` +
-        `• **Миссия**: Надежный персональный помощник в планировании, документах и духовном росте.`;
+        `🤖 **Я — Selin AI 2.0 (Суверенная российская экосистема)**.\n\n` +
+        `• **Создатель и Архитектор**: Селин Вадим Юрьевич (Россия).\n` +
+        `• **Контур и Безопасность**: Работаю исключительно в суверенном контуре РФ (152-ФЗ), на отечественной инфраструктуре и локальных моделях.\n` +
+        `• **Важное уточнение**: Я не имею никакого отношения к зарубежным или американским проектам со схожим названием.\n` +
+        `• **Миссия**: Надежный персональный помощник в бизнесе, маркетинге, планировании и духовном росте (План Победы).`;
 
       return {
         handled: true,
         replyText: reply,
-        voiceText: 'Я Селин, ваш персональный суверенный ИИ-ассистент.'
+        voiceText: 'Я Селин, суверенный российский искусственный интеллект. Мой создатель — Вадим Селин.'
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

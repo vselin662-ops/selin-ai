@@ -1,5 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
-import Groq from "groq-sdk";
 import OpenAI from "openai";
 import crypto from "crypto";
 import { redisService } from "../services/RedisService";
@@ -10,16 +8,10 @@ import { logger } from "../logger";
 import { searchWeb } from "../services/ai/WebSearchService";
 import { getIdentityPromptBlock } from "../services/IdentityService";
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || process.env.LLM_PROVIDER || (process.env.CLOUDRU_API_KEY ? 'cloudru' : (process.env.GROQ_API_KEY ? 'groq' : (process.env.OPENROUTER_API_KEY ? 'openrouter' : (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'))));
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || (process.env.CLOUDRU_API_KEY ? 'cloudru' : 'ollama');
 const PRIMARY_MODEL = process.env.PRIMARY_MODEL || process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
-const STRONGER_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash'];
-const LITE_GEMINI_MODELS = ['gemini-3.5-flash-lite'];
-
-let currentActiveModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-let lastModelCheckTime = 0;
-const ONE_HOUR_MS = 60 * 60 * 1000;
+let currentActiveModel = PRIMARY_MODEL;
 
 export function getActiveModelName(): string {
   return currentActiveModel;
@@ -426,19 +418,10 @@ export function markFail(provider: string, error?: any) {
 
 export function isProviderConfigured(provider: string): boolean {
   if (provider === 'ollama') {
-    return true; // Локальное ядро на ВМ
-  }
-  if (provider === 'groq') {
-    return !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10 && !process.env.GROQ_API_KEY.includes('your_'));
-  }
-  if (provider === 'openrouter') {
-    return !!(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.length > 10 && !process.env.OPENROUTER_API_KEY.includes('your_'));
-  }
-  if (provider === 'gemini') {
-    return !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10 && !process.env.GEMINI_API_KEY.includes('your_'));
+    return true; // Локальное китайское ядро Qwen на ВМ
   }
   if (provider === 'cloudru') {
-    return !!process.env.CLOUDRU_API_KEY;
+    return !!process.env.CLOUDRU_API_KEY; // Российское ядро Cloud.ru
   }
   return false;
 }
@@ -502,60 +485,15 @@ export const providerQueue = new ProviderConcurrencyQueue();
 export const FALLBACK_PHRASE = "Слушаю вас! Пожалуйста, повторите или уточните ваш вопрос.";
 
 export class LLMService {
-  private gemini: GoogleGenAI | null = null;
-  private currentGeminiApiKey: string | null = null;
-  private groq: Groq | null = null;
-  private currentGroqApiKey: string | null = null;
   private chatMemories: LRUCache<string, ChatMemory>;
 
-  constructor(geminiApiKey?: string, groqApiKey?: string) {
+  constructor() {
     this.chatMemories = new LRUCache<string, ChatMemory>({
       max: 1000,
       ttl: 30 * 60 * 1000, // 30 мин
     });
-    const gKey = geminiApiKey || process.env.GEMINI_API_KEY;
-    if (gKey && !gKey.includes('your_') && !gKey.includes('placeholder') && gKey.length > 10) {
-      this.gemini = new GoogleGenAI({ apiKey: gKey });
-      this.currentGeminiApiKey = gKey;
-    } else {
-      logger.warn("⚠️ GEMINI_API_KEY is not defined or is placeholder in LLMService environment.");
-    }
 
-    const grKey = groqApiKey || process.env.GROQ_API_KEY;
-    if (grKey && !grKey.includes('your_') && !grKey.includes('placeholder') && grKey.length > 10) {
-      this.groq = new Groq({ apiKey: grKey });
-      this.currentGroqApiKey = grKey;
-    } else {
-      logger.warn("⚠️ GROQ_API_KEY is not defined or is placeholder in LLMService environment.");
-    }
-
-    logger.info('🧠 [LLM] primary: ' + PRIMARY_PROVIDER + '/' + PRIMARY_MODEL);
-  }
-
-  private getGeminiClient(): GoogleGenAI | null {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
-      return null;
-    }
-    if (!this.gemini || this.currentGeminiApiKey !== apiKey) {
-      this.gemini = new GoogleGenAI({ apiKey });
-      this.currentGeminiApiKey = apiKey;
-      markOk('gemini'); // Clear circuit breaker block when key is updated
-    }
-    return this.gemini;
-  }
-
-  private getGroqClient(): Groq | null {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
-      return null;
-    }
-    if (!this.groq || this.currentGroqApiKey !== apiKey) {
-      this.groq = new Groq({ apiKey });
-      this.currentGroqApiKey = apiKey;
-      markOk('groq'); // Clear circuit breaker block when key is updated
-    }
-    return this.groq;
+    logger.info('🧠 [LLM] Sovereign Core Activated: ' + PRIMARY_PROVIDER + '/' + PRIMARY_MODEL);
   }
 
   private async callWithSystem(userMessage: string, systemPrompt: string): Promise<string | null> {
@@ -564,86 +502,31 @@ export class LLMService {
     if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
       effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
     }
-    try {
-      const groq = this.getGroqClient();
-      if (groq) {
-        const model = await pickGroqModel();
-        const completion = await groq.chat.completions.create({
-          messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
-          model: model,
-          temperature: 0.7,
-          max_tokens: 800,
-        });
-        const res = completion.choices[0]?.message?.content?.trim();
+    const messages = [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }];
+
+    // 1. Пытаемся через Cloud.ru
+    if (process.env.CLOUDRU_API_KEY) {
+      try {
+        const res = await this.callCloudRU(messages);
         if (res) return sanitize(res);
+      } catch (e) {
+        logger.warn('⚠️ [callWithSystem] Cloud.ru failed, falling back to local Ollama...');
       }
-    } catch (e) {
-      console.log('⚠️ [callWithSystem] Groq failed, trying Gemini...');
     }
 
+    // 2. Локальная Ollama (Qwen)
     try {
-      const gemini = this.getGeminiClient();
-      if (gemini) {
-        const completion = await gemini.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-          config: {
-            systemInstruction: effectiveSystem,
-            temperature: 0.7
-          }
-        });
-        const res = completion.text?.trim();
-        if (res) return sanitize(res);
-      }
+      const res = await this.callOllama(messages);
+      if (res) return sanitize(res);
     } catch (e) {
-      console.log('⚠️ [callWithSystem] Gemini failed...');
+      logger.error('⚠️ [callWithSystem] Ollama failed: ' + (e as any)?.message);
     }
 
     return null;
   }
 
   private async callWithSystemDirect(userMessage: string, systemPrompt: string): Promise<string | null> {
-    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
-    let effectiveSystem = systemPrompt || "";
-    if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
-      effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
-    }
-    try {
-      const groq = this.getGroqClient();
-      if (groq) {
-        const model = await pickGroqModel();
-        const completion = await groq.chat.completions.create({
-          messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
-          model: model,
-          temperature: 0.7,
-          max_tokens: 2000,
-        });
-        const res = completion.choices[0]?.message?.content?.trim();
-        if (res) return sanitize(res);
-      }
-    } catch (e) {
-      console.log('⚠️ [callWithSystemDirect] Groq failed, trying Gemini...');
-    }
-
-    try {
-      const gemini = this.getGeminiClient();
-      if (gemini) {
-        const completion = await gemini.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-          config: {
-            systemInstruction: effectiveSystem,
-            temperature: 0.7
-          }
-        });
-        const res = completion.text?.trim();
-        if (res) return sanitize(res);
-      }
-    } catch (e) {
-      console.log('⚠️ [callWithSystemDirect] Gemini failed...');
-    }
-
-    return null;
+    return this.callWithSystem(userMessage, systemPrompt);
   }
 
   public getMemory(chatId: string): ChatMemory {
@@ -660,51 +543,13 @@ export class LLMService {
   }
 
   public async callWithWebSearch(message: string, systemPrompt?: string): Promise<string> {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder')) {
-      logger.warn("⚠️ OPENROUTER_API_KEY is missing, falling back to standard LLM");
-      throw new Error("OPENROUTER_API_KEY is missing");
-    }
-
-    try {
-      const client = new OpenAI({
-        baseURL: 'https://openrouter.ai/api/v1',
-        apiKey: apiKey,
-        defaultHeaders: {
-          'HTTP-Referer': 'https://selin.ai',
-          'X-Title': 'SelinAI'
-        }
-      });
-
-      const messages: any[] = [];
-      let effectiveSystem = systemPrompt || "";
-      const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
-      if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
-        effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
-      }
-      if (effectiveSystem) {
-        messages.push({ role: 'system', content: effectiveSystem });
-      }
-      messages.push({ role: 'user', content: message });
-
-      const completion = await client.chat.completions.create({
-        model: 'google/gemini-2.0-flash-exp:free:online',
-        messages: messages,
-        temperature: 0.7,
-        reasoning: { exclude: true },
-        include_reasoning: false
-      } as any);
-
-      const response = completion.choices[0]?.message?.content?.trim();
-      if (response) {
-        logger.info("🌐 [WebSearch] Web search response retrieved successfully via OpenRouter");
-        return sanitize(response);
-      }
-      throw new Error("Empty response from OpenRouter");
-    } catch (err: any) {
-      logger.error(`❌ [WebSearch] callWithWebSearch error: ${err?.message || err}`);
-      throw err;
-    }
+    const webResults = await searchWeb(message);
+    const resultsList = (webResults || []).map(r => `${r.title} — ${r.snippet} — ${r.url}`).join('\n');
+    const enrichedPrompt = (systemPrompt || '') + `\n\nСВЕЖИЕ ДАННЫЕ ИЗ ИНТЕРНЕТА:\n${resultsList}\nОпирайся на эти данные при ответе.`;
+    return this.call([
+      { role: 'system', content: enrichedPrompt },
+      { role: 'user', content: message }
+    ]);
   }
 
   public async smartCall(
@@ -744,7 +589,7 @@ export class LLMService {
       }
 
       const start = Date.now();
-      const provider = process.env.PRIMARY_PROVIDER || "openrouter";
+      const provider = process.env.PRIMARY_PROVIDER || "ollama";
       
       let response: string;
       try {
@@ -807,6 +652,30 @@ export class LLMService {
       content: (msg.content || '').slice(0, 4000),
       timestamp: msg.timestamp
     }));
+
+    // Интеграция Проактивной Эпизодической Памяти RAG (Selin Memory System)
+    let recalledContext = '';
+    try {
+      const { MemorySystem } = await import("./MemorySystem");
+      const memSystem = new MemorySystem();
+      
+      // Авто-индексация важных намерений (мечты о машинах, бизнес-цели)
+      const isImportantInfo = /хочу|мечтаю|планирую|цель|бизнес|моя компания|заработать|купить/i.test(userMessage);
+      if (isImportantInfo && userMessage.length > 10) {
+        logger.info(`💾 [MemorySystem] Авто-сохранение эпизодического факта в RAG: "${userMessage}"`);
+        await memSystem.save(chatId, {
+          message: { role: 'user', content: userMessage, timestamp: Date.now() }
+        });
+      }
+
+      // Извлекаем релевантные воспоминания перед генерацией ответа
+      recalledContext = await memSystem.recall(chatId, userMessage);
+      if (recalledContext) {
+        logger.info(`🧠 [MemorySystem] Извлечены эпизодические воспоминания для контекста:\n${recalledContext}`);
+      }
+    } catch (memErr) {
+      logger.warn('⚠️ [MemorySystem] Failed to integrate episodic recall/save:', memErr);
+    }
 
     // Определяем системный промпт если не передан
     const now = new Date();
@@ -994,6 +863,11 @@ ${identityBlock}
       }
     }
 
+    // Подмешиваем извлеченные эпизодические воспоминания RAG в системный промпт
+    if (recalledContext) {
+      finalSystem += `\n\n📌 ВАЖНЫЙ ЭПИЗОДИЧЕСКИЙ КОНТЕКСТ О ПОЛЬЗОВАТЕЛЕ (твои воспоминания):\n${recalledContext}\nИспользуй эти факты в диалоге для создания ощущения долгосрочной заботы и личной памяти!`;
+    }
+
     // === ROUTING CHAIN ===
     const messages = [
       { role: 'system', content: finalSystem },
@@ -1010,11 +884,8 @@ ${identityBlock}
     let responseText: string | null = null;
     let successfulProvider: string | null = null;
 
-    // Hybrid LLM Chain: Groq (ultra-fast) -> OpenRouter / Gemini -> Cloud.ru -> Ollama (local)
+    // Суверенная цепочка моделей: Cloud.ru (РФ/Сбер) -> Ollama (Китай/Qwen Alibaba)
     const allProviders = [
-      { name: 'groq', call: () => this.callGroq(messages) },
-      { name: 'openrouter', call: () => this.callOpenRouterChain(messages) },
-      { name: 'gemini', call: () => this.callGemini(messages, finalSystem) },
       { name: 'cloudru', call: () => this.callCloudRU(messages) },
       { name: 'ollama', call: () => this.callOllama(messages) }
     ];
@@ -1098,72 +969,22 @@ ${identityBlock}
       }
     }
 
-    const gemini = this.getGeminiClient();
-    if (gemini) {
+    // 1. Попытка через Cloud.ru
+    if (process.env.CLOUDRU_API_KEY) {
       try {
-        let systemInstruction = "";
-        const formattedContents: any[] = [];
-        for (const msg of messages) {
-          if (msg.role === 'system') {
-            systemInstruction += (systemInstruction ? "\n" : "") + msg.content;
-          } else {
-            formattedContents.push({
-              role: msg.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: msg.content }]
-            });
-          }
-        }
-
-        const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
-        if (!systemInstruction.includes("Когда ответ озвучивается голосом")) {
-          systemInstruction = (systemInstruction ? systemInstruction + "\n\n" : "") + voiceRule;
-        }
-
-        const config: any = {
-          temperature: 0.8
-        };
-        if (systemInstruction) {
-          config.systemInstruction = systemInstruction;
-        }
-
-        const completion = await gemini.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: formattedContents,
-          config: config
-        });
-
-        const text = completion.text?.trim();
-        if (text) {
-          return sanitize(text);
-        }
+        const text = await this.callCloudRU(messages);
+        if (text) return sanitize(text);
       } catch (err: any) {
-        logger.warn(`⚠️ callLLM failed via Gemini, falling back to Groq: ${err?.message || err}`);
+        logger.warn(`⚠️ callLLM failed via Cloud.ru, falling back to Ollama: ${err?.message || err}`);
       }
     }
 
-    // Fallback для старых вызовов
+    // 2. Попытка через локальную Ollama (Qwen)
     try {
-      const groq = this.getGroqClient();
-      if (groq) {
-        const model = await pickGroqModel();
-
-        try {
-          const completion = await groq.chat.completions.create({
-            messages: messages as any,
-            model: model,
-            temperature: 0.8,
-            max_tokens: 2000,
-          });
-          const text = completion.choices[0]?.message?.content;
-          if (text && typeof text === 'string') {
-            return sanitize(text.trim());
-          }
-        } catch (err: any) {
-          logger.warn(`⚠️ Model ${model} failed in callLLM: ${err?.message || err}`);
-        }
-      }
-    } catch (gErr: any) {
-      logger.error(`⚠️ Groq client initialization failed: ${gErr?.message || gErr}`);
+      const text = await this.callOllama(messages);
+      if (text) return sanitize(text);
+    } catch (ollamaErr: any) {
+      logger.error(`⚠️ callLLM failed via Ollama: ${ollamaErr?.message || ollamaErr}`);
     }
 
     return "Привет! Я — Selin AI. Чем могу помочь?";
@@ -1243,82 +1064,6 @@ ${identityBlock}
         }
       }
 
-      const gemini = this.getGeminiClient();
-      if (gemini) {
-        try {
-          let formattedContents = contents;
-          if (Array.isArray(contents)) {
-            formattedContents = contents.map((c: any) => {
-              let role = c.role;
-              if (role === 'assistant' || role === 'model') role = 'model';
-              else role = 'user';
-
-              let parts = c.parts;
-              if (typeof parts === 'string') {
-                parts = [{ text: parts }];
-              } else if (Array.isArray(parts)) {
-                parts = parts.map((p: any) => {
-                  if (typeof p === 'string') return { text: p };
-                  if (p.text) return { text: p.text };
-                  return p;
-                });
-              }
-              return { role, parts };
-            });
-          } else if (typeof contents === 'string') {
-            formattedContents = [{ role: 'user', parts: [{ text: contents }] }];
-          }
-
-          const geminiConfig: any = {
-            temperature: cfg?.temperature ?? 0.7,
-          };
-          if (sysInstText) {
-            geminiConfig.systemInstruction = sysInstText;
-          }
-          if (cfg?.responseMimeType) {
-            geminiConfig.responseMimeType = cfg.responseMimeType;
-          }
-          if (cfg?.responseSchema) {
-            geminiConfig.responseSchema = cfg.responseSchema;
-          }
-          if (cfg?.tools) {
-            geminiConfig.tools = cfg.tools;
-          }
-
-          const response = await gemini.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: formattedContents,
-            config: geminiConfig
-          });
-
-          const responseText = isJsonExpected ? (response.text || "") : sanitize(response.text || "");
-
-          let candidates: any[] = [];
-          if (response.candidates && response.candidates.length > 0) {
-            candidates = response.candidates;
-          } else {
-            candidates = [
-              {
-                content: {
-                  parts: [
-                    {
-                      text: responseText
-                    }
-                  ]
-                }
-              }
-            ];
-          }
-
-          return {
-            text: responseText,
-            candidates: candidates
-          };
-        } catch (geminiErr: any) {
-          logger.warn(`⚠️ [LLMService.generateWithFallback] Gemini call failed: ${geminiErr?.message || geminiErr}`);
-        }
-      }
-
       const messages = this.convertGeminiToGroqMessages(contents, sysInstText);
       let textResult = await this.call(messages);
 
@@ -1350,26 +1095,16 @@ ${identityBlock}
         candidates: [
           {
             content: {
-              parts: [
-                {
-                  text: textResult
-                }
-              ]
+              parts: [{ text: textResult }]
             }
           }
         ]
       };
-    } catch (err: any) {
-      logger.error(`❌ generateWithFallback failed: ${err?.message || err}`);
-      if (isJsonExpected) {
-        return {
-          text: "{}",
-          candidates: [{ content: { parts: [{ text: "{}" }] } }]
-        };
-      }
+    } catch (e: any) {
+      logger.error('❌ [generateWithFallback] Sovereign execution error:', e);
       return {
-        text: "Привет! Я — Selin AI. Чем могу помочь?",
-        candidates: [{ content: { parts: [{ text: "Привет! Я — Selin AI. Чем могу помочь?" }] } }]
+        text: isJsonExpected ? '{"status":"ok"}' : 'Готов помочь вам с вашим вопросом.',
+        candidates: []
       };
     }
   }
@@ -1457,125 +1192,6 @@ ${identityBlock}
       logger.warn(`⚠️ [callCompat] OpenRouter model ${model} failed: ${err.message}`);
     }
     return null;
-  }
-
-  private async callOpenRouterChain(messages: any[]): Promise<string> {
-    const orKey = process.env.OPENROUTER_API_KEY;
-    if (!orKey || orKey.includes('your_') || orKey.includes('placeholder') || orKey.length < 10) {
-      throw new Error("OPENROUTER_API_KEY is not configured");
-    }
-
-    const openrouter = new OpenAI({
-      baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: orKey,
-      timeout: 12000,
-      defaultHeaders: {
-        'HTTP-Referer': 'https://selin.ai',
-        'X-Title': 'SelinAI'
-      }
-    });
-
-    const chainModels = [
-      "google/gemini-3.5-flash",
-      "anthropic/claude-sonnet-4",
-      "meta-llama/llama-3.3-70b-instruct",
-      "qwen/qwen-2.5-72b-instruct"
-    ];
-
-    let lastError: any = null;
-    for (const model of chainModels) {
-      try {
-        const completion = await openrouter.chat.completions.create({
-          model: model,
-          messages,
-          temperature: 0.8,
-          max_tokens: 2000,
-          reasoning: { exclude: true },
-          include_reasoning: false
-        } as any);
-        const response = completion.choices[0]?.message?.content?.trim();
-        if (response) {
-          return sanitize(response);
-        }
-      } catch (err: any) {
-        lastError = err;
-      }
-    }
-    throw (lastError || new Error("All OpenRouter models failed"));
-  }
-
-  private async callGroq(messages: any[]): Promise<string> {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey || apiKey.includes('your_') || apiKey.includes('placeholder') || apiKey.length < 10) {
-      throw new Error("GROQ_API_KEY is not configured");
-    }
-    const groq = this.getGroqClient();
-    if (!groq) {
-      throw new Error("Groq client not available");
-    }
-    const model = await pickGroqModel();
-    const completion = await groq.chat.completions.create({
-      messages,
-      model: model,
-      temperature: 0.8,
-      max_tokens: 2000,
-    });
-    const response = completion.choices[0]?.message?.content?.trim();
-    if (!response) {
-      throw new Error("Empty response from Groq");
-    }
-    return sanitize(response);
-  }
-
-  private async callGemini(messages: any[], systemPrompt: string): Promise<string> {
-    const gemini = this.getGeminiClient();
-    if (!gemini) {
-      throw new Error("GEMINI_API_KEY is not configured or invalid");
-    }
-    const contents: any[] = [];
-    for (const m of messages) {
-      if (m.role === 'system') continue;
-      contents.push({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: (m.content || '').slice(0, 4000) }]
-      });
-    }
-    if (contents.length === 0) {
-      contents.push({ role: 'user', parts: [{ text: 'Привет' }] });
-    }
-    const candidateModels = Array.from(new Set([
-      GEMINI_MODEL,
-      'gemini-3.5-flash-lite',
-      'gemini-3.8-flash'
-    ]));
-
-    const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
-    let finalInstruction = systemPrompt || "";
-    if (!finalInstruction.includes("Когда ответ озвучивается голосом")) {
-      finalInstruction = (finalInstruction ? finalInstruction + "\n\n" : "") + voiceRule;
-    }
-
-    let lastError: any = null;
-    for (const modelName of candidateModels) {
-      try {
-        const completion = await gemini.models.generateContent({
-          model: modelName,
-          contents: contents,
-          config: {
-            systemInstruction: finalInstruction,
-            temperature: 0.8
-          }
-        });
-        const response = completion.text?.trim();
-        if (response) {
-          return sanitize(response);
-        }
-      } catch (err: any) {
-        lastError = err;
-        logger.warn(`⚠️ [callGemini] Model ${modelName} failed: ${err?.message || err}`);
-      }
-    }
-    throw (lastError || new Error("Empty response from Gemini"));
   }
 
   private async callCloudRU(messages: any[]): Promise<string> {

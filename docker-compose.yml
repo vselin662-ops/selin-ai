@@ -16,8 +16,18 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - WHISPER_BASE_URL=http://whisper:9000
+      - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
       - ./data:/app/data
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: selin-ai-ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
 
   redis:
     image: redis:alpine
@@ -44,3 +54,4 @@ services:
 volumes:
   redis_data:
   whisper_cache:
+  ollama_models:

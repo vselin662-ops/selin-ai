@@ -31,6 +31,8 @@ import { IdentityHandler } from './handlers/IdentityHandler';
 import { CallbackHandler } from './handlers/CallbackHandler';
 import { GuestActivationHandler } from './handlers/GuestActivationHandler';
 import { MarketingCRMHandler } from './handlers/MarketingCRMHandler';
+import { LanguageTutorHandler } from './handlers/LanguageTutorHandler';
+import { BusinessMentorHandler } from './handlers/BusinessMentorHandler';
 import { DefaultLLMHandler } from './handlers/DefaultLLMHandler';
 
 /**
@@ -49,6 +51,8 @@ export class MaxAdapter {
     this.router = new MaxWebhookRouter([
       new StartHandler(),
       new TenantHandler(),
+      new LanguageTutorHandler(),
+      new BusinessMentorHandler(),
       new VoiceInputHandler(),
       new VoiceModeHandler(),
       new VisionHandler(),

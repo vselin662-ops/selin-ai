@@ -9,7 +9,17 @@ export class CallbackHandler implements IMessageHandler {
   public readonly priority = 25; // Высокий приоритет для мгновенной обработки кликов кнопок
 
   public canHandle(ctx: HandlerContext): boolean {
-    return ctx.isCallbackUpdate || Boolean(ctx.callbackData);
+    const data = ctx.callbackData || '';
+    return (
+      ctx.isCallbackUpdate ||
+      data.startsWith('approve_') ||
+      data.startsWith('reject_') ||
+      data === 'trial_sub' ||
+      data.startsWith('plan_') ||
+      data.startsWith('bible_') ||
+      data.startsWith('crm_') ||
+      data.startsWith('quest_')
+    );
   }
 
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
@@ -49,6 +59,130 @@ export class CallbackHandler implements IMessageHandler {
         return {
           handled: true,
           replyText: '🎁 Пробный период на 3 дня успешно активирован!'
+        };
+      }
+
+      // === ИНТЕЛЛЕКТУАЛЬНЫЙ ИИ-КВЕСТ ДЛЯ ПОЛУЧЕНИЯ БЕСПЛАТНОГО VIP 30 ДНЕЙ ===
+      if (data === 'quest_start') {
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [
+                  [
+                    { type: 'callback', text: '🌐 Локально на сервере РФ', payload: 'quest_q1_correct' },
+                    { type: 'callback', text: '☁️ В дата-центре в США', payload: 'quest_q1_wrong' }
+                  ]
+                ]
+              }
+            }
+          ]
+        };
+
+        return {
+          handled: true,
+          replyText:
+            `🎁 **Добро пожаловать в ИИ-Квест «Суверенный Интеллект»!**\n\n` +
+            `Ответьте правильно на 2 вопроса по кибербезопасности и получите **30 дней бесплатной VIP-подписки**.\n\n` +
+            `❓ **Вопрос №1**:\n` +
+            `Где физически обрабатываются голосовые сообщения и база данных в системе Selin AI, гарантируя 100% приватность по 152-ФЗ?`,
+          extra
+        };
+      }
+
+      if (data === 'quest_q1_wrong') {
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [[{ type: 'callback', text: '↩️ Попробовать еще раз', payload: 'quest_start' }]]
+              }
+            }
+          ]
+        };
+        return {
+          handled: true,
+          replyText: '❌ **Неверно!** Облачные серверы в США подконтрольны зарубежным спецслужбам и нарушают закон 152-ФЗ.',
+          extra
+        };
+      }
+
+      if (data === 'quest_q1_correct') {
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [
+                  [
+                    { type: 'callback', text: '📈 Отравить отчет', payload: 'quest_q2_wrong' },
+                    { type: 'callback', text: '🎭 Запустить Ролевую игру', payload: 'quest_q2_correct' }
+                  ]
+                ]
+              }
+            }
+          ]
+        };
+
+        return {
+          handled: true,
+          replyText:
+            `🎉 **Абсолютно верно!** Все данные крутятся в изолированном локальном контуре на вашем сервере в РФ.\n\n` +
+            `❓ **Вопрос №2 (Финальный)**:\n` +
+            `Какой инструмент Бизнес-Ментора позволяет оттачивать навыки продаж, соревнуясь с ИИ, играющим роль сложного клиента с возражениями?`,
+          extra
+        };
+      }
+
+      if (data === 'quest_q2_wrong') {
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [[{ type: 'callback', text: '↩️ Назад к Вопросу №2', payload: 'quest_q1_correct' }]]
+              }
+            }
+          ]
+        };
+        return {
+          handled: true,
+          replyText: '❌ **Неверно!** Отчет служит для фиксации дневного результата по SMART. Попробуйте еще раз!',
+          extra
+        };
+      }
+
+      if (data === 'quest_q2_correct') {
+        // Награда: Активация подписки на 30 дней в SQLite
+        activateSubscription(ctx.chatId, 'plan', 30);
+
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [
+                  [
+                    { type: 'callback', text: '💼 Начать Бизнес-Менторство', payload: 'biz_menu' },
+                    { type: 'callback', text: '🌍 Изучать Языки', payload: 'lang_menu' }
+                  ]
+                ]
+              }
+            }
+          ]
+        };
+
+        return {
+          handled: true,
+          replyText:
+            `🏆 **ПОЗДРАВЛЯЕМ! КВЕСТ ПРОЙДЕН!** 🏆\n\n` +
+            `Вы проявили глубокие знания ИИ-архитектуры и кибербезопасности.\n\n` +
+            `🎁 Вам успешно начислена **Безлимитная VIP-подписка на 30 дней**!\n` +
+            `Все суверенные ИИ-модули и голосовой каскад разблокированы на полную мощность.\n\n` +
+            `Выберите ИИ-модуль для старта:`,
+          extra
         };
       }
 
@@ -104,18 +238,44 @@ export class CallbackHandler implements IMessageHandler {
       if (data === 'crm_objection_expensive') {
         const { MarketingCRMService } = await import('../../../services/marketing/MarketingCRMService');
         const res = await MarketingCRMService.analyzeChatAndAdvise(ctx.chatId, 'Клиент говорит: У вас слишком дорого, мне предлагают дешевле.');
+        
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [[{ type: 'callback', text: '↩️ Назад к меню продаж', payload: 'biz_roleplay' }]]
+              }
+            }
+          ]
+        };
+
         return {
           handled: true,
-          replyText: `🎯 **Отработка возражения «Дорого»**:\n\n${res.bestReply}`
+          replyText: `🎯 **Отработка возражения «Дорого»**:\n\n${res.bestReply}`,
+          extra
         };
       }
 
       if (data === 'crm_objection_think') {
         const { MarketingCRMService } = await import('../../../services/marketing/MarketingCRMService');
         const res = await MarketingCRMService.analyzeChatAndAdvise(ctx.chatId, 'Клиент говорит: Спасибо, я подумаю и напишу позже.');
+        
+        const extra = {
+          attachments: [
+            {
+              type: 'inline_keyboard',
+              payload: {
+                buttons: [[{ type: 'callback', text: '↩️ Назад к меню продаж', payload: 'biz_roleplay' }]]
+              }
+            }
+          ]
+        };
+
         return {
           handled: true,
-          replyText: `⏳ **Отработка возражения «Я подумаю»**:\n\n${res.bestReply}`
+          replyText: `⏳ **Отработка возражения «Я подумаю»**:\n\n${res.bestReply}`,
+          extra
         };
       }
 

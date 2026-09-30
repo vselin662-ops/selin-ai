@@ -124,20 +124,18 @@ export async function buildUserMorningBriefing(chatId: string, userName?: string
   const tz = userSettings.tz || 'Europe/Moscow';
   const name = userName ? userName.split(' ')[0] : 'друг';
 
-  const parts: string[] = [`☀️ Доброе утро, ${name}!`];
-
+  let weatherText = '';
   // 1. Погода
   if (config.include_weather) {
     const cityTarget = config.lat && config.lon ? `${config.lat},${config.lon}` : (config.city || 'Москва');
     const weather = await fetchWeatherForUser(cityTarget);
     const cityName = config.city || 'вашем городе';
-    if (weather === 'погода недоступна') {
-      parts.push('Погода недоступна.');
-    } else {
-      parts.push(`В ${cityName}: ${weather}.`);
+    if (weather !== 'погода недоступна') {
+      weatherText = `В ${cityName}: ${weather}.`;
     }
   }
 
+  let parableText = '';
   // 2. Притча: глава = числу дня месяца (1-31), 2-3 стиха
   if (config.include_parable) {
     try {
@@ -145,40 +143,70 @@ export async function buildUserMorningBriefing(chatId: string, userName?: string
       const dayOfMonth = parseInt(new Intl.DateTimeFormat('ru-RU', { timeZone: tz, day: 'numeric' }).format(now), 10) || 1;
       const parableRes = await scriptureService.getPassage('Притчи', dayOfMonth, { start: 1, end: 3 });
       if (parableRes?.text && !parableRes.text.includes('недоступен')) {
-        parts.push(`Притча ${dayOfMonth}: «${parableRes.text}»`);
+        parableText = `Притча дня: «${parableRes.text}»`;
       }
     } catch (pErr) {
       logger.warn(`⚠️ [Briefing] Parable error for ${chatId}:`, pErr);
     }
   }
 
+  let psalmText = '';
   // 3. Псалом: randomPsalm(chatId) с не-повторением 3 дня
   if (config.include_psalm) {
     try {
       const psalm = await scriptureService.randomPsalm(chatId);
       if (psalm?.text && !psalm.text.includes('недоступен')) {
-        parts.push(`Псалом ${psalm.psalmNum}: «${psalm.text}»`);
+        psalmText = `Псалом ${psalm.psalmNum}: «${psalm.text}»`;
       }
     } catch (psErr) {
       logger.warn(`⚠️ [Briefing] Psalm error for ${chatId}:`, psErr);
     }
   }
 
-  // 4. Стих дня: из сегодняшнего чтения Плана Победы
-  if (config.include_verse) {
+  // Сборка ИИ-Заботы (Суверенный Проактивный Оркестратор)
+  try {
+    const { MemorySystem } = await import('../../../core/MemorySystem');
+    const { llmService } = await import('../../../core/LLMService');
+    const memSystem = new MemorySystem();
+    const profile = await memSystem.getProfile(chatId);
+    
+    // Получаем последние важные цели/факты о пользователе
+    const recalledGoals = await memSystem.recall(chatId, "моя цель мечта компания");
+
+    // Вытаскиваем вчерашнюю бизнес-статистику задач
+    let pendingTasksText = '';
     try {
-      const dayNum = getDayOfYear(tz);
-      const plan = oneYearPlan.getPlanForDay(dayNum);
-      const reading = plan.morning[0] || { b: 'Бытие', c: 1 };
-      const verseRes = await scriptureService.getPassage(reading.b, reading.c, { start: 1, end: 1 });
-      if (verseRes?.text && !verseRes.text.includes('недоступен')) {
-        parts.push(`Стих дня (${reading.b} ${reading.c}:1): «${verseRes.text}»`);
+      const taskRow = sqliteDb?.prepare("SELECT current_task, status FROM user_business_tasks WHERE chat_id = ?").get(chatId) as any;
+      if (taskRow) {
+        pendingTasksText = `Вчера у нас была задача: "${taskRow.current_task}". Статус: [${taskRow.status === 'completed' ? 'Выполнена' : 'Не сделана'}].`;
       }
-    } catch (vErr) {
-      logger.warn(`⚠️ [Briefing] Verse error for ${chatId}:`, vErr);
+    } catch {}
+
+    const prompt = 
+      `Ты — Selin AI, суверенный проактивный ассистент заботы.\n` +
+      `Твоя задача — составить персональное, невероятно живое, заботливое и поддерживающее утреннее приветствие для владельца по имени ${name}.\n` +
+      `Данные утра:\n` +
+      `- Погода: ${weatherText || 'нет данных'}\n` +
+      `- ${parableText || 'нет'}\n` +
+      `- ${psalmText || 'нет'}\n` +
+      `- Факты памяти/Мечты о нем: ${recalledGoals || 'нет'}\n` +
+      `- Бизнес-задачи: ${pendingTasksText || 'нет задач'}\n\n` +
+      `Напиши связное, вдохновляющее и деловое напутствие (до 5 предложений). Не льсти, не лебези, будь сильным, надежным и проактивным партнером. Начни со слов "Доброе утро, [имя]!" и сразу дай понять, что ты помнишь его глобальные цели.`;
+
+    const aiBriefing = await llmService.smartCall(chatId, "Генерируй утреннее приветствие", prompt);
+    if (aiBriefing && aiBriefing.length > 50) {
+      logger.info(`⚡ [morningBriefing] Сгенерирован проактивный ИИ-брифинг для ${chatId}`);
+      return cleanForMax(aiBriefing);
     }
+  } catch (aiErr) {
+    logger.error('⚠️ [morningBriefing] Failed to construct AI-proactive care, fallback to template:', aiErr);
   }
 
+  // Фолбэк шаблонный сборщик, если ИИ упал
+  const parts: string[] = [`☀️ Доброе утро, ${name}!`];
+  if (weatherText) parts.push(weatherText);
+  if (parableText) parts.push(parableText);
+  if (psalmText) parts.push(psalmText);
   parts.push('Хорошего и благословенного дня! 🙏');
   return cleanForMax(parts.join(' '));
 }

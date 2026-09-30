@@ -24,7 +24,8 @@ import {
   Award,
   Mic,
   VolumeX,
-  Play
+  Play,
+  Info
 } from 'lucide-react';
 import { GlassPanel } from './components/GlassPanel';
 import { NeonButton } from './components/NeonButton';
@@ -115,7 +116,7 @@ const AVAILABLE_VOICES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'lifestyle' | 'bible' | 'feed' | 'moderation' | 'knowledge' | 'settings'>('main');
+  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'moderation' | 'knowledge' | 'settings'>('main');
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceToast, setVoiceToast] = useState<string | null>(null);
   const [showMicGuide, setShowMicGuide] = useState(false);
@@ -159,6 +160,11 @@ export default function App() {
 
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Стейты интерактивных руководств и ИИ-Помощника
+  const [showManual, setShowManual] = useState<boolean>(false);
+  const [manualTitle, setManualTabTitle] = useState<string>('Главный Экран');
+  const [manualContent, setManualContent] = useState<string>('');
 
   const [voiceDialogue, setVoiceDialogue] = useState<VoiceDialogueState>({
     userText: '',
@@ -553,15 +559,6 @@ export default function App() {
               <span>Бизнес</span>
             </button>
             <button
-              onClick={() => { setActiveTab('lifestyle'); setMenuOpen(false); }}
-              className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
-                activeTab === 'lifestyle' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
-              }`}
-            >
-              <Car className="w-4 h-4 text-emerald-400" />
-              <span>Быт (Скоро)</span>
-            </button>
-            <button
               onClick={() => { setActiveTab('feed'); setMenuOpen(false); }}
               className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
                 activeTab === 'feed' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
@@ -642,18 +639,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('lifestyle')}
-            className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
-              activeTab === 'lifestyle'
-                ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold'
-                : 'bg-[#1C1715] text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#26201D]'
-            }`}
-          >
-            <Car className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Быт (Скоро)</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('feed')}
             className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
               activeTab === 'feed'
@@ -711,6 +696,64 @@ export default function App() {
           >
             <Sliders className="w-3.5 h-3.5" />
             <span>Настройки</span>
+          </button>
+        </div>
+
+        {/* Интерактивная Кнопка Мануала и Руководства для текущего открытого окна */}
+        <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-[#201916] to-[#161210] border border-[#C5A059]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#C5A059]/10 border border-[#C5A059]/30 flex items-center justify-center text-[#C5A059] shrink-0">
+              <HelpCircle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-[#EAE6DF] uppercase tracking-wider">❓ Как устроен этот раздел?</h4>
+              <p className="text-[11px] text-[#9E958C] mt-0.5">
+                {activeTab === 'main' && 'Главный пульт управления, голосовой интерфейс и быстрые команды.'}
+                {activeTab === 'languages' && 'Профессиональный ИИ-репетитор с алгоритмом Anki (SM-2), Shadowing и разбором ДЗ.'}
+                {activeTab === 'business' && 'Интеллектуальный бизнес-трекер: SMART-задачи, отчетность и симулятор продаж.'}
+                {activeTab === 'lifestyle' && 'Автоматизация быта (такси, еда, отели) голосовыми командами.'}
+                {activeTab === 'feed' && 'Живой логгер и пульт HITL (утверждение ответов ИИ перед отправкой клиентам).'}
+                {activeTab === 'bible' && 'Духовный трекер: План Победы, рассылка псалмов, молитв и утренний брифинг.'}
+                {activeTab === 'moderation' && 'Панель модерации контента и управление поведением нейросети.'}
+                {activeTab === 'knowledge' && 'Локальный суверенный поисковик и база знаний проекта (без передачи данных в США).'}
+                {activeTab === 'settings' && 'Конфигурация проекта, выбор голоса и тон общения ИИ.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              let title = "Руководство";
+              let content = "";
+              if (activeTab === 'main') {
+                title = "Главный пульт Selin AI";
+                content = "Добро пожаловать в Ядро Selin AI! На главном экране вы можете общаться с ИИ голосом. Встроенный голосовой интерфейс понимает Wake-слова (Selin777 для мужского голоса, Selin000 для женского). Бот работает автономно без отправки ваших аудио в США. Вы можете нажать быстрые команды внизу голосовой карточки для моментального старта.";
+              } else if (activeTab === 'languages') {
+                title = "Модуль Языкового Наставника";
+                content = "Агент не просто выдает слова, он ведет вас по стадиям обучения. \n\nКоманды в MAX-боте:\n• /язык английский (или другой) — выбор курса. Агент выполнит суверенный поиск по Яндексу и найдет лучшую бесплатную программу.\n• новый урок — агент объяснит тему, даст 3-4 ключевых слова и ЗАДАСТ ПРОВЕРОЧНЫЙ ВОПРОС.\n• Ответ на вопрос — просто напишите ответ в чат. Агент сам распознает проверку ДЗ, оценит по 5-бальной шкале и разберет ошибки.\n• повторение — запуск карточек Anki (SM-2) со скрытым переводом.\n• прогресс — просмотр вашей статистики и ударных дней (streak).";
+              } else if (activeTab === 'business') {
+                title = "Бизнес-Ментор Selin AI";
+                content = "Этот модуль заменяет дорогого трекера и помогает расти по SMART-методологии.\n\nКоманды в MAX-боте:\n• /бизнес — запустить менторинг и диагностику.\n• задание — получить жесткую прикладную задачу на сегодня. Срок сдачи — до 20:00.\n• отчёт [ваш текст] — сдать отчет о выполнении. Агент проанализирует результат и зафиксирует его в БД.\n• ролевая игра — бот притворится вредным клиентом или крупным байером и будет возражать, а вы должны закрыть сделку.\n• обзор — еженедельный срез узких мест бизнеса.";
+              } else if (activeTab === 'feed') {
+                title = "Живой Реестр Штаба (HITL)";
+                content = "Ваш пульт безопасности. Если ИИ-продавцу пишет внешний клиент, ответ не улетает напрямую. Черновик ответа падает в эту ленту. Вы читаете его и нажимаете кнопку 'Утвердить' или вносите корректировки. Это исключает галлюцинации ИИ перед клиентами.";
+              } else if (activeTab === 'bible') {
+                title = "План Победы и Духовный трекер";
+                content = "Настройка утренней рассылки духовного брифинга (Библия, псалмы, погода, притчи) и вечернего контроля. Вы можете настроить время рассылки и часовой пояс кнопками прямо в MAX-боте.";
+              } else if (activeTab === 'knowledge') {
+                title = "Суверенная База Знаний";
+                content = "Сюда вы можете загружать свои регламенты, книги, законы. Поиск по базе полностью суверенен и происходит локально. Все американские системы вырезаны. Поиск в сети идет через Яндекс.XML API.";
+              } else {
+                title = "Настройка Selin AI";
+                content = "Здесь вы задаете имя владельца, название бизнеса, язык по умолчанию и выбираете голосовой движок. Все изменения мгновенно сохраняются в локальной SQLite БД.";
+              }
+              setManualTabTitle(title);
+              setManualContent(content);
+              setShowManual(true);
+            }}
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase tracking-wider hover:bg-[#D4B06A] transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#C5A059]/10 shrink-0"
+          >
+            <Info className="w-4 h-4" />
+            <span>Открыть Инструкцию</span>
           </button>
         </div>
 
@@ -801,8 +844,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* 3 CORE CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 2 СУВЕРЕННЫЕ СЛУЖБЫ ШТАБА */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Card 1: Languages */}
               <div
                 onClick={() => {
@@ -862,41 +905,6 @@ export default function App() {
                   <span>→</span>
                 </div>
               </div>
-
-              {/* Card 3: Lifestyle (Coming Soon) */}
-              <div
-                onClick={() => {
-                  console.log("quick_command_click", "Бот & Сервисы");
-                  console.log("quick_command_click(Бот & Сервисы)");
-                  setActiveTab('lifestyle');
-                  handleVoiceInput('Расскажи про бот и сервисы');
-                }}
-                className="group p-6 rounded-2xl bg-[#161210] border border-[#2A231F] hover:border-[#C5A059]/50 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 shadow-xl opacity-90"
-              >
-                <div className="space-y-4">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
-                    <Car className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-bold text-[#EAE6DF] group-hover:text-[#C5A059] transition-colors">
-                        🚕 Бот & Сервисы
-                      </h3>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                        Скоро
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#A89E94] mt-2 leading-relaxed">
-                      Интеграция заказа такси, доставки еды, поиска билетов и бронирования отелей через голосовой интерфейс.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="pt-6 border-t border-[#26201D] mt-6 flex items-center justify-between text-xs font-semibold text-emerald-400">
-                  <span>В разработке</span>
-                  <span>⏳</span>
-                </div>
-              </div>
             </div>
 
             {/* AI Agents Live Status & Queue Load Monitor */}
@@ -931,7 +939,7 @@ export default function App() {
 
                 <div className="p-4 rounded-xl bg-[#1C1715] border border-[#2A231F]">
                   <div className="text-xs text-[#9E958C]">Проверка домашних заданий</div>
-                  <div className="text-lg font-bold text-[#EAE6DF] mt-1">Gemini AI</div>
+                  <div className="text-lg font-bold text-[#EAE6DF] mt-1">Selin AI</div>
                   <div className="text-[10px] text-amber-400 mt-1">Оценка и разбор ошибок</div>
                 </div>
               </div>
@@ -1014,27 +1022,6 @@ export default function App() {
                   <span>Запустить ментор в Max</span>
                   <ExternalLink className="w-4 h-4" />
                 </a>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: LIFESTYLE (COMING SOON) */}
-        {activeTab === 'lifestyle' && (
-          <div className="space-y-6">
-            <div className="p-8 rounded-2xl bg-[#161210] border border-[#2A231F] text-center space-y-4">
-              <Car className="w-12 h-12 text-emerald-400 mx-auto animate-pulse" />
-              <h3 className="text-2xl font-bold text-[#EAE6DF]">🚕 Бытовой консьерж Selin AI</h3>
-              <p className="text-xs text-[#A89E94] max-w-md mx-auto">
-                Модуль автоматизации бытовых задач находится в разработке. Скоро: заказ такси, доставка еды, покупка авиабилетов и бронирование через голосового ассистента.
-              </p>
-              <div className="pt-4">
-                <button
-                  onClick={() => setActiveTab('main')}
-                  className="px-6 py-2.5 rounded-xl bg-[#26201D] text-[#EAE6DF] border border-[#382F2A] font-medium text-xs hover:border-[#C5A059]/40 transition-all"
-                >
-                  Вернуться на главную
-                </button>
               </div>
             </div>
           </div>
@@ -1273,6 +1260,72 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Модальное окно суверенного мануала Selin AI */}
+      {showManual && (
+        <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-xl bg-[#161210] border border-[#C5A059]/40 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#2A231F] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-[#C5A059] animate-pulse" />
+                <h4 className="text-sm font-bold text-[#EAE6DF] uppercase tracking-wider">📖 {manualTitle}</h4>
+              </div>
+              <button
+                onClick={() => setShowManual(false)}
+                className="p-1 rounded-lg text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#221C19]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs text-[#C8BFAF] leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto pr-1">
+              {manualContent}
+            </div>
+
+            <div className="pt-2 border-t border-[#2A231F] flex justify-end gap-2">
+              <a
+                href={MAX_BOT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase flex items-center gap-1.5 hover:bg-[#D4B06A]"
+              >
+                <span>Перейти в MAX-бот</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <button
+                onClick={() => setShowManual(false)}
+                className="px-4 py-2 rounded-xl bg-[#26201D] text-[#EAE6DF] text-xs font-medium border border-[#382F2A] hover:bg-[#322A26]"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Интерактивный Голосовой ИИ-Помощник Настройщик (Виджет в углу) */}
+      <div className="fixed bottom-6 right-6 z-[1000] animate-bounce">
+        <button
+          onClick={() => {
+            const advice = 
+              `Привет! Я — ваш локальный ассистент Selin AI. \n\n` +
+              `Сейчас вы находитесь в разделе «${activeTab.toUpperCase()}». \n` +
+              `Я могу прямо сейчас помочь вам настроить эту страницу!\n` +
+              `Просто нажмите кнопку «Микрофон» на панели выше и дайте мне команду голосом, или перейдите в MAX-бот для глубокой автоматизации.`;
+            setVoiceDialogue({
+              userText: 'Помощь в настройке',
+              assistantText: advice,
+              isGenerating: false,
+              isOpen: true
+            });
+            speakText(advice, activeVoice);
+          }}
+          className="w-14 h-14 rounded-full bg-gradient-to-tr from-[#C5A059] to-[#D4B06A] text-[#0F0D0C] flex items-center justify-center shadow-2xl border-2 border-[#161210] hover:scale-110 transition-transform cursor-pointer"
+          title="Нужна помощь с настройкой?"
+        >
+          <Bot className="w-7 h-7" />
+        </button>
+      </div>
 
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-4 sm:px-6 py-8 border-t border-[#2A231F] mt-12 text-center text-xs text-[#7A7167]">

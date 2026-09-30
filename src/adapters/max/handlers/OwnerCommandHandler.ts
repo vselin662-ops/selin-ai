@@ -38,6 +38,35 @@ export class OwnerCommandHandler implements IMessageHandler {
         };
       }
 
+      if (text === '/users' || text === 'пользователи' || text === 'клиенты') {
+        const { sqliteDb } = await import('../../../db');
+        let subs: any[] = [];
+        let profiles: any[] = [];
+        try {
+          if (sqliteDb) {
+            subs = sqliteDb.prepare('SELECT * FROM subscriptions LIMIT 50').all() || [];
+            profiles = sqliteDb.prepare('SELECT * FROM user_profiles LIMIT 50').all() || [];
+          }
+        } catch {}
+
+        const totalUsers = Math.max(subs.length, profiles.length);
+        let userListText = `👑 **Список активных пользователей (${totalUsers})**:\n\n`;
+
+        if (subs.length > 0) {
+          subs.slice(0, 15).forEach((s, idx) => {
+            const date = s.paid_until ? new Date(s.paid_until).toLocaleDateString('ru-RU') : 'бессрочно';
+            userListText += `${idx + 1}. ID: \`${s.chat_id}\` | Тариф: **${s.plan}** | До: ${date}\n`;
+          });
+        } else {
+          userListText += 'Пока нет сохраненных записей в базе subscriptions.\n';
+        }
+
+        return {
+          handled: true,
+          replyText: userListText
+        };
+      }
+
       if (text.startsWith('/broadcast')) {
         const msg = ctx.text.replace(/^\/broadcast\s*/i, '').trim();
         if (!msg) {

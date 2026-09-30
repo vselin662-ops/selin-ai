@@ -35,8 +35,16 @@ export class MaxWebhookRouter {
       '';
     const messageId = String(rawMid).trim();
 
-    // 1. Deduplication Check
-    if (messageId) {
+    // 1. Deduplication Check (только для обычных текстовых сообщений, НЕ для callback-кликов!)
+    const isCallback = Boolean(
+      payload.callback_id ||
+      payload.callback_data ||
+      payload.body?.callback_id ||
+      payload.type === 'callback' ||
+      payload.event === 'callback'
+    );
+
+    if (messageId && !isCallback) {
       const isDupe = await DeduplicationStore.isDuplicate(messageId);
       if (isDupe) {
         logger.info(`[MaxWebhookRouter] Duplicate message ignored: ${messageId}`);

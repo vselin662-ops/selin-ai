@@ -14,16 +14,19 @@ export class StartHandler implements IMessageHandler {
 
   public async handle(ctx: HandlerContext): Promise<HandlerResult> {
     try {
-      // Ensure profile with Victory Plan is initialized for new user
+      // Инициализируем профиль по умолчанию
       ensureNewUserPlanProfile(ctx.chatId);
 
       const welcomeText =
-        '👋 **Здравствуйте! Я Селин** — ваш персональный ИИ-ассистент.\n\n' +
-        '🔹 **Планирование**: Цели, задачи, SMART-брифинг.\n' +
-        '🔹 **Документы**: Поиск по вашим файлам PDF, DOCX, TXT.\n' +
-        '🔹 **Библия и духовный трекер**: Синодальный перевод, псалмы, годовой План Победы.\n' +
-        '🔹 **Голос**: Поддерживаю аудиосообщения и голосовые ответы.\n\n' +
-        'Напишите команду или задайте любой вопрос!';
+        '👋 **Приветствую вас! Я Selin AI** — ваш суверенный ИИ-напарник нового поколения.\n\n' +
+        'Я не просто чат-бот, я — обучаемая ИИ-система, созданная для решения реальных задач.\n\n' +
+        '🔥 **Доступные интерактивные модули**:\n' +
+        '• 🌍 **Языковой Наставник** (Курсы, слова, диалоги, произношение, проверка ДЗ).\n' +
+        '• 💼 **Бизнес-Ментор** (SMART-задачи, CRM, симулятор переговоров).\n' +
+        '• 📖 **Духовный трекер** (Синодальный перевод Библии, псалмы, утренний брифинг).\n\n' +
+        '🎁 **ИНТЕЛЛЕКТУАЛЬНЫЙ ИИ-КВЕСТ**:\n' +
+        'Пройдите наш суверенный квест на логику и эрудицию прямо сейчас и получите **бесплатный безлимитный VIP-доступ на 30 дней**!\n\n' +
+        'Пожалуйста, выберите действие на кнопках ниже:';
 
       const extra = {
         attachments: [
@@ -32,12 +35,12 @@ export class StartHandler implements IMessageHandler {
             payload: {
               buttons: [
                 [
-                  { type: 'callback', text: '📖 План Победы', payload: 'plan_today' },
-                  { type: 'callback', text: '🕊 Псалом дня', payload: 'get_psalm' }
+                  { type: 'callback', text: '🌍 Языковой Наставник', payload: 'lang_menu' },
+                  { type: 'callback', text: '💼 Бизнес-Ментор', payload: 'biz_menu' }
                 ],
                 [
-                  { type: 'callback', text: '🎯 Мои цели', payload: 'my_goals' },
-                  { type: 'callback', text: '📂 Мои документы', payload: 'my_docs' }
+                  { type: 'callback', text: '🎁 Пройти ИИ-Квест (VIP 30д)', payload: 'quest_start' },
+                  { type: 'callback', text: '🕊 Псалом дня', payload: 'bible_psalm_today' }
                 ]
               ]
             }
@@ -48,7 +51,7 @@ export class StartHandler implements IMessageHandler {
       return {
         handled: true,
         replyText: welcomeText,
-        voiceText: 'Здравствуйте, я Селин, ваш персональный помощник.',
+        voiceText: 'Приветствую вас! Я Селин эй ай, ваш автономный суверенный ассистент. Выберите нужный раздел на кнопках под сообщением.',
         extra
       };
     } catch (err: unknown) {

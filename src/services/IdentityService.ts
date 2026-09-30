@@ -136,7 +136,7 @@ export function handleCreatorQuestion(chatId: string | number): string {
   // Логирование попытки: '🔮 [Identity] attempt mode=<sealed|open> chat=<id>'
   logger.info(`🔮 [Identity] attempt mode=${mode} chat=${cleanId}`);
 
-  return 'Меня создал Вадим Селин — разработчик из России.';
+  return 'Мой создатель и архитектор — Вадим Селин, разработчик из России. Я работаю исключительно в суверенном отечественном контуре (152-ФЗ) и не имею никакого отношения к зарубежным или американским сервисам со схожим названием.';
 }
 
 /**
