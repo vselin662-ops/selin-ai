@@ -87,7 +87,7 @@ export const VPNPanel: React.FC = () => {
     return ProtocolGenerator.generateVLESS({
       uuid,
       serverIp: serverHost || '176.108.252.111',
-      port: 443,
+      port: 3000,
       clientName: client.client_name || 'Vasya'
     });
   };

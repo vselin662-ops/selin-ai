@@ -55,7 +55,7 @@ class MaxBotService {
       const vlessLink = ProtocolGenerator.generateVLESS({
         uuid: clientUuid,
         serverIp,
-        port: 443,
+        port: 3000,
         clientName: client.client_name || 'User'
       });
 
@@ -89,7 +89,7 @@ class MaxBotService {
       const vlessLink = ProtocolGenerator.generateVLESS({
         uuid: clientUuid,
         serverIp,
-        port: 443,
+        port: 3000,
         clientName: 'Max User ' + tenantId.slice(-4)
       });
 

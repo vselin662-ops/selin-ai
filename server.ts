@@ -44,6 +44,7 @@ import yookassaWebhookRouter from "./src/routes/yookassa.webhook";
 import voiceRouter from "./src/routes/voice.routes";
 import adminRouter from "./src/routes/admin.routes";
 import { VPNService } from "./src/services/network/VPNService";
+import { nativeVLESSEngine } from "./src/services/network/NativeVLESSEngine";
 import aiRouter from "./src/routes/ai.routes";
 import mcpRouter from "./src/routes/mcp.routes";
 import legalRouter from "./src/routes/legal.routes";
@@ -408,6 +409,7 @@ async function startServer() {
 
   const serverInstance = app.listen(PORT, "0.0.0.0", () => {
     logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT} (Cloud Run HTTP/2 Ingress Ready)`);
+    nativeVLESSEngine.attach(serverInstance, "/selin-ws");
   });
 
   serverInstance.on("error", (err: unknown) => {
