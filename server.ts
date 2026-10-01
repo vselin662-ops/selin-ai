@@ -14,6 +14,10 @@ if (!fs.existsSync(envPath)) {
 
 dotenv.config({ path: envPath, override: true });
 
+console.log(`📂 [ENV DIAGNOSTICS] Resolved .env path: ${envPath}`);
+console.log(`📂 [ENV DIAGNOSTICS] File exists: ${fs.existsSync(envPath)}`);
+console.log(`📂 [ENV DIAGNOSTICS] MAX_BOT_TOKEN is loaded: ${!!process.env.MAX_BOT_TOKEN} (length: ${process.env.MAX_BOT_TOKEN ? process.env.MAX_BOT_TOKEN.length : 0})`);
+
 import express from "express";
 import cors from "cors";
 
