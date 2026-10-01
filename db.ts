@@ -90,6 +90,9 @@ try {
     CREATE INDEX IF NOT EXISTS idx_vpn_clients_chat ON vpn_clients(chat_id);
     CREATE INDEX IF NOT EXISTS idx_vpn_clients_user ON vpn_clients(username);
 
+    INSERT OR IGNORE INTO vpn_clients (id, chat_id, client_name, username, password, plan, status, created_at)
+    VALUES ('vpn_test_01', 'test_user', 'Vasya Bobruisk', 'selin_08wn9', 'cfmw7d3a', 'annual_500', 'active', datetime('now'));
+
     -- Core Autonomous Intelligence Tables
     CREATE TABLE IF NOT EXISTS memory_long_term (
       id TEXT PRIMARY KEY,
