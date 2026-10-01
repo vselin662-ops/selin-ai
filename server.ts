@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 // Поиск .env файла в нескольких возможных местах для максимальной совместимости
 const possiblePaths = [
+  "/services/selin-ai/.env",
   path.resolve(__dirname, ".env"),
   path.resolve(__dirname, "..", ".env"),
   path.resolve(__dirname, "..", "..", ".env"),
