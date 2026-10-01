@@ -1,11 +1,18 @@
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, ".env"), override: true });
+// Поиск .env файла в текущей папке или на уровень выше (для поддержки скомпилированной папки dist)
+let envPath = path.resolve(__dirname, ".env");
+if (!fs.existsSync(envPath)) {
+  envPath = path.resolve(__dirname, "..", ".env");
+}
+
+dotenv.config({ path: envPath, override: true });
 
 import express from "express";
 import cors from "cors";
