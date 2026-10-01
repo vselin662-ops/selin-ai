@@ -4,15 +4,21 @@ set -e
 echo "🚀 [Selin AI] Активация сверхзащищенного туннеля AmneziaWG + Cloudflare WARP..."
 echo "🛡️ Этот протокол полностью обходит ТСПУ (DPI в РФ) за счет обфускации пакетов!"
 
-# 1. Проверяем наличие wgcf-profile.conf
-WGCF_CONF="/wgcf-profile.conf"
-if [ ! -f "$WGCF_CONF" ] && [ -f "./wgcf-profile.conf" ]; then
-  WGCF_CONF="./wgcf-profile.conf"
-fi
-
-if [ ! -f "$WGCF_CONF" ] && [ -f "/app/applet/wgcf-profile.conf" ]; then
-  WGCF_CONF="/app/applet/wgcf-profile.conf"
-fi
+# 1. Проверяем наличие wgcf-profile.conf в различных возможных директориях
+WGCF_CONF=""
+for path in \
+  "/wgcf-profile.conf" \
+  "./wgcf-profile.conf" \
+  "$HOME/wgcf-profile.conf" \
+  "/home/ubuntu/wgcf-profile.conf" \
+  "/home/ubuntu/selin-ai-app/selin-ai-app/wgcf-profile.conf" \
+  "/services/selin-ai/wgcf-profile.conf" \
+  "/app/applet/wgcf-profile.conf"; do
+  if [ -f "$path" ]; then
+    WGCF_CONF="$path"
+    break
+  fi
+done
 
 # 2. Установка необходимых репозиториев и AmneziaWG
 echo "📦 Подключение репозитория Amnezia PPA..."
