@@ -7,6 +7,7 @@ import { sqliteDb } from "../../db";
 import { SSHService } from "../services/SSHService";
 import { SecurityAuditService } from "../services/SecurityAuditService";
 import { VPNService } from "../services/network/VPNService";
+import { selinTunnelEngine } from "../services/network/SelinTunnelEngine";
 
 const execAsync = promisify(exec);
 import {
@@ -98,6 +99,33 @@ adminRouter.post("/admin/vpn-clients-delete", (req, res) => {
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
+});
+
+// SEST (Selin Encrypted Stream Tunnel) Production Endpoints
+adminRouter.get("/admin/tunnel-stats", (req, res) => {
+  try {
+    return res.json(selinTunnelEngine.getStats());
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+adminRouter.post("/tunnel/handshake", (req, res) => {
+  const { username, password } = req.body;
+  if (!username) return res.status(400).json({ error: "Username required" });
+
+  const auth = selinTunnelEngine.authenticateClient(username, password);
+  if (!auth.success) {
+    return res.status(401).json({ error: auth.error || "Authentication failed" });
+  }
+
+  const sessionId = selinTunnelEngine.registerSession(auth.clientId!, username, auth.plan!);
+  return res.json({
+    success: true,
+    sessionId,
+    protocol: "SEST-v2-HTTPS-Multiplex",
+    message: "Encrypted stream tunnel handshake successful"
+  });
 });
 
 // 1. Sync Status

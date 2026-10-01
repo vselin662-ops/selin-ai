@@ -407,13 +407,7 @@ async function startServer() {
   }
 
   const serverInstance = app.listen(PORT, "0.0.0.0", () => {
-    logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT}`);
-    // Auto-start Selin Security Tunnel (SST)
-    VPNService.getInstance().start(1080).then(() => {
-      logger.info(`🛡️ [SST] Selin Security Tunnel auto-started on port 1080`);
-    }).catch((err) => {
-      logger.warn(`⚠️ [SST] Could not auto-start VPN tunnel on port 1080 (port in use or restricted): ${err?.message || err}`);
-    });
+    logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT} (Cloud Run HTTP/2 Ingress Ready)`);
   });
 
   serverInstance.on("error", (err: unknown) => {
