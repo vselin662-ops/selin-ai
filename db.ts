@@ -73,6 +73,23 @@ try {
       ts TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS vpn_clients (
+      id TEXT PRIMARY KEY,
+      chat_id TEXT,
+      client_name TEXT NOT NULL,
+      username TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      plan TEXT DEFAULT 'standard',
+      status TEXT DEFAULT 'active',
+      bytes_limit INTEGER DEFAULT -1,
+      bytes_used INTEGER DEFAULT 0,
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_vpn_clients_chat ON vpn_clients(chat_id);
+    CREATE INDEX IF NOT EXISTS idx_vpn_clients_user ON vpn_clients(username);
+
     -- Core Autonomous Intelligence Tables
     CREATE TABLE IF NOT EXISTS memory_long_term (
       id TEXT PRIMARY KEY,

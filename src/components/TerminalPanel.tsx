@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal as TerminalIcon, Send, RefreshCw, Trash2, Cpu, Database, Activity } from 'lucide-react';
+import { Terminal as TerminalIcon, Send, RefreshCw, Trash2, Cpu, Database, Activity, Globe } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
 
 interface TerminalLine {
@@ -14,6 +14,28 @@ export const TerminalPanel: React.FC = () => {
   const [isExecuting, setIsExecuting] = useState(false);
   const [isRemote, setIsRemote] = useState<boolean | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Начальное приветствие
+    addLine('out', 'Selin AI Sovereign Core Terminal v2.1 initialized.');
+    addLine('out', 'Ready for secure operations.');
+    
+    // Проверка статуса при загрузке
+    const checkStatus = async () => {
+      try {
+        const res = await adminApi('/api/admin/terminal/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsRemote(data.configured);
+        } else {
+          setIsRemote(false);
+        }
+      } catch (e) {
+        setIsRemote(false);
+      }
+    };
+    checkStatus();
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -70,6 +92,7 @@ export const TerminalPanel: React.FC = () => {
     { label: 'Docker', cmd: 'docker ps', icon: <Database className="w-3 h-3" /> },
     { label: 'Ollama', cmd: 'ollama list', icon: <RefreshCw className="w-3 h-3" /> },
     { label: 'App Logs', cmd: 'tail -n 50 logs/app.log', icon: <TerminalIcon className="w-3 h-3" /> },
+    { label: 'Check Net', cmd: 'ping -c 4 google.com', icon: <Globe className="w-3 h-3 text-blue-400" /> },
     { label: 'Update Core', cmd: 'cd /services/selin-ai && sudo git pull origin main && sudo docker compose build --no-cache selin-ai && sudo docker compose up -d selin-ai', icon: <RefreshCw className="w-3 h-3 text-emerald-400" /> },
   ];
 

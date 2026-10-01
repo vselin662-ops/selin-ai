@@ -33,6 +33,7 @@ import { GuestActivationHandler } from './handlers/GuestActivationHandler';
 import { MarketingCRMHandler } from './handlers/MarketingCRMHandler';
 import { LanguageTutorHandler } from './handlers/LanguageTutorHandler';
 import { BusinessMentorHandler } from './handlers/BusinessMentorHandler';
+import { VPNHandler } from './handlers/VPNHandler';
 import { DefaultLLMHandler } from './handlers/DefaultLLMHandler';
 
 /**
@@ -75,6 +76,7 @@ export class MaxAdapter {
       new CallbackHandler(),
       new GuestActivationHandler(),
       new MarketingCRMHandler(),
+      new VPNHandler(),
       new DefaultLLMHandler(selinCore)
     ]);
   }

@@ -43,6 +43,7 @@ import { fintechRouter } from "./src/fintech/routes";
 import yookassaWebhookRouter from "./src/routes/yookassa.webhook";
 import voiceRouter from "./src/routes/voice.routes";
 import adminRouter from "./src/routes/admin.routes";
+import { VPNService } from "./src/services/network/VPNService";
 import aiRouter from "./src/routes/ai.routes";
 import mcpRouter from "./src/routes/mcp.routes";
 import legalRouter from "./src/routes/legal.routes";
@@ -306,7 +307,8 @@ app.use((req, res, next) => {
     url === "/api/admin/login" || 
     url.startsWith("/api/admin/login?") || 
     url === "/api/admin/status" || 
-    url.startsWith("/api/admin/status?")
+    url.startsWith("/api/admin/status?") ||
+    url.startsWith("/api/admin/vpn-")
   ) {
     return next();
   }
@@ -406,6 +408,12 @@ async function startServer() {
 
   const serverInstance = app.listen(PORT, "0.0.0.0", () => {
     logger.info(`🚀 SELIN Enterprise AI Core running on port ${PORT}`);
+    // Auto-start Selin Security Tunnel (SST)
+    VPNService.getInstance().start(1080).then(() => {
+      logger.info(`🛡️ [SST] Selin Security Tunnel auto-started on port 1080`);
+    }).catch((err) => {
+      logger.warn(`⚠️ [SST] Could not auto-start VPN tunnel on port 1080 (port in use or restricted): ${err?.message || err}`);
+    });
   });
 
   serverInstance.on("error", (err: unknown) => {

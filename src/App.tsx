@@ -40,6 +40,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
 import { AgentStatusPanel } from './components/AgentStatusPanel';
 import { TerminalPanel } from './components/TerminalPanel';
+import { VPNPanel } from './components/VPNPanel';
 import { AppConfig } from './types';
 import { adminApi } from './lib/adminApi';
 
@@ -118,7 +119,7 @@ const AVAILABLE_VOICES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'terminal' | 'moderation' | 'knowledge' | 'settings'>('main');
+  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'terminal' | 'vpn' | 'moderation' | 'knowledge' | 'settings'>('main');
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceToast, setVoiceToast] = useState<string | null>(null);
   const [showMicGuide, setShowMicGuide] = useState(false);
@@ -579,6 +580,15 @@ export default function App() {
               <span>Терминал СВМ</span>
             </button>
             <button
+              onClick={() => { setActiveTab('vpn'); setMenuOpen(false); }}
+              className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
+                activeTab === 'vpn' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
+              }`}
+            >
+              <Shield className="w-4 h-4 text-emerald-400" />
+              <span>Selin VPN</span>
+            </button>
+            <button
               onClick={() => { setActiveTab('moderation'); setMenuOpen(false); }}
               className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
                 activeTab === 'moderation' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
@@ -674,6 +684,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('vpn')}
+            className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
+              activeTab === 'vpn'
+                ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold'
+                : 'bg-[#1C1715] text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#26201D]'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Selin VPN</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('bible')}
             className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
               activeTab === 'bible'
@@ -737,6 +759,7 @@ export default function App() {
                 {activeTab === 'lifestyle' && 'Автоматизация быта (такси, еда, отели) голосовыми командами.'}
                 {activeTab === 'feed' && 'Живой логгер и пульт HITL (утверждение ответов ИИ перед отправкой клиентам).'}
                 {activeTab === 'terminal' && 'Прямой доступ к ядру СВМ: выполнение системных команд, мониторинг ресурсов и логи сервера.'}
+                {activeTab === 'vpn' && 'Сверхзащищенный SOCKS5-туннель для безопасного выхода в сеть и анонимизации трафика.'}
                 {activeTab === 'bible' && 'Духовный трекер: План Победы, рассылка псалмов, молитв и утренний брифинг.'}
                 {activeTab === 'moderation' && 'Панель модерации контента и управление поведением нейросети.'}
                 {activeTab === 'knowledge' && 'Локальный суверенный поисковик и база знаний проекта (без передачи данных в США).'}
@@ -760,6 +783,12 @@ export default function App() {
               } else if (activeTab === 'feed') {
                 title = "Живой Реестр Штаба (HITL)";
                 content = "Ваш пульт безопасности. Если ИИ-продавцу пишет внешний клиент, ответ не улетает напрямую. Черновик ответа падает в эту ленту. Вы читаете его и нажимаете кнопку 'Утвердить' или вносите корректировки. Это исключает галлюцинации ИИ перед клиентами.";
+              } else if (activeTab === 'terminal') {
+                title = "Консоль Ядра СВМ";
+                content = "Прямой терминал управления вашей виртуальной машиной. Вы можете выполнять безопасные системные команды, проверять логи и статус Docker-контейнеров. Все действия логируются в системе аудита.";
+              } else if (activeTab === 'vpn') {
+                title = "Selin Security Tunnel (VPN)";
+                content = "Ваш персональный SOCKS5-прокси сервер, запущенный внутри проекта. \n\nКак использовать:\n1. Нажмите 'Запустить VPN'.\n2. Настройте ваше устройство или браузер на использование SOCKS5 прокси (адрес текущего сайта, порт по умолчанию 1080).\n3. Трафик будет шифроваться и проходить через узел Selin AI, скрывая ваш реальный IP и защищая данные.";
               } else if (activeTab === 'bible') {
                 title = "План Победы и Духовный трекер";
                 content = "Настройка утренней рассылки духовного брифинга (Библия, псалмы, погода, притчи) и вечернего контроля. Вы можете настроить время рассылки и часовой пояс кнопками прямо в MAX-боте.";
@@ -1054,6 +1083,7 @@ export default function App() {
         {/* PANELS FROM HEADQUARTERS */}
         {activeTab === 'feed' && <StaffFeed />}
         {activeTab === 'terminal' && <TerminalPanel />}
+        {activeTab === 'vpn' && <VPNPanel />}
         {activeTab === 'bible' && <BibleTrackerPanel />}
         {activeTab === 'moderation' && <ModerationPanel />}
         {activeTab === 'knowledge' && <KnowledgeBasePanel />}

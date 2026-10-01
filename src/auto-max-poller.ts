@@ -165,6 +165,12 @@ export async function poll(): Promise<void> {
         });
 
         res.on('end', async () => {
+          if (res.statusCode === 401) {
+            console.error('[AUTO-MAX-POLLER] ❌ Unauthorized! Please check your MAX_BOT_TOKEN. Stopping poller.');
+            isPollingActive = true; // Keep it true to effectively stop further polls
+            return;
+          }
+
           isPollingActive = false;
           console.log(`[AUTO-MAX-POLLER] Response status: ${res.statusCode}. Body length: ${rawData.length}. Body: ${rawData}`);
           try {
@@ -240,8 +246,16 @@ export async function poll(): Promise<void> {
     });
 
     req.on('error', (e) => {
-      console.error('[AUTO-MAX-POLLER] Network Error:', e.message);
-      isPollingActive = false;
+      // Small delay before allowing next poll on error
+      setTimeout(() => {
+        isPollingActive = false;
+      }, 2000);
+
+      if (e.message === 'socket hang up') {
+        console.log('[AUTO-MAX-POLLER] Connection closed by server (socket hang up) - retrying in 2s...');
+      } else {
+        console.error('[AUTO-MAX-POLLER] Network Error:', e.message);
+      }
     });
 
     req.end();

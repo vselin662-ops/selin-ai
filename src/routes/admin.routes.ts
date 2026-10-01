@@ -5,6 +5,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { sqliteDb } from "../../db";
 import { SSHService } from "../services/SSHService";
+import { SecurityAuditService } from "../services/SecurityAuditService";
+import { VPNService } from "../services/network/VPNService";
 
 const execAsync = promisify(exec);
 import {
@@ -24,6 +26,79 @@ import {
 import { logger } from "../logger";
 
 const adminRouter = Router();
+
+// 0. VPN Control (Moved to top for priority)
+adminRouter.get("/admin/vpn-status", (req, res) => {
+  try {
+    const vpn = VPNService.getInstance();
+    return res.json(vpn.getStatus());
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+adminRouter.post("/admin/vpn-toggle", async (req, res) => {
+  const { active, port } = req.body;
+  const vpn = VPNService.getInstance();
+  const status = vpn.getStatus();
+
+  try {
+    if (active && !status.active) {
+      await vpn.start(port || 1080);
+      logFeedEvent("security", "vpn", "VPN Туннель запущен", `Порт: ${port || 1080}`, "success");
+    } else if (!active && status.active) {
+      vpn.stop();
+      logFeedEvent("security", "vpn", "VPN Туннель остановлен", "", "warning");
+    }
+    return res.json({ success: true, status: vpn.getStatus() });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+adminRouter.get("/admin/vpn-clients", (req, res) => {
+  if (!sqliteDb) return res.status(500).json({ error: "DB not initialized" });
+  try {
+    const clients = sqliteDb.prepare("SELECT * FROM vpn_clients ORDER BY created_at DESC").all();
+    return res.json({ clients: clients || [] });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+adminRouter.post("/admin/vpn-clients", (req, res) => {
+  const { client_name, plan, expires_at } = req.body;
+  if (!client_name) return res.status(400).json({ error: "client_name is required" });
+
+  const id = `vpn_${Date.now()}`;
+  const username = `selin_${Math.random().toString(36).substring(2, 7)}`;
+  const password = Math.random().toString(36).substring(2, 10);
+  const now = new Date().toISOString();
+
+  try {
+    sqliteDb.prepare(`
+      INSERT INTO vpn_clients (id, client_name, username, password, plan, status, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, client_name, username, password, plan || 'standard', 'active', expires_at || null, now);
+
+    logFeedEvent("security", "vpn", "Новый клиент VPN", client_name, "success");
+    return res.json({ success: true, client: { id, client_name, username, password } });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+adminRouter.post("/admin/vpn-clients-delete", (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: "ID is required" });
+
+  try {
+    sqliteDb.prepare("DELETE FROM vpn_clients WHERE id = ?").run(id);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 // 1. Sync Status
 adminRouter.get("/sync-status", (req, res) => {
@@ -238,8 +313,20 @@ adminRouter.post(["/max/send-message", "/telegram/send-message"], async (req, re
 });
 
 // 10. Admin Terminal (System Commands)
+adminRouter.get("/admin/terminal/status", (req, res) => {
+  return res.json({
+    configured: SSHService.isConfigured(),
+    host: '176.108.252.111',
+    user: 'ubuntu'
+  });
+});
+
 adminRouter.post("/admin/terminal", async (req, res) => {
   const { command } = req.body;
+  const user = (req as any).user;
+  const chatId = user?.chatId || user?.sub || 'unknown';
+  const ip = req.ip || req.socket.remoteAddress;
+
   if (!command) return res.status(400).json({ error: "Command is required" });
 
   // Список разрешенных безопасных команд или их префиксов
@@ -249,16 +336,24 @@ adminRouter.post("/admin/terminal", async (req, res) => {
     'tail -n 50 logs/app.log', 'tail -n 50 logs/error.log',
     'cd /services/selin-ai && sudo git pull',
     'sudo git pull',
-    'sudo docker compose'
+    'sudo docker compose',
+    'curl', 'ping -c 4', 'nslookup', 'wget'
   ];
 
   const isAllowed = allowedCommands.some(c => command.startsWith(c));
   
   // Дополнительная проверка на опасные символы (блокируем ; , < , > , $ , | )
-  // Разрешаем && для цепочек и | для grep
   const isDangerous = /[;><$]/.test(command) || (command.includes('|') && !command.includes('grep'));
   
   if (!isAllowed && isDangerous) {
+    await SecurityAuditService.logEvent({
+      chatId,
+      action: 'TERMINAL_COMMAND_BLOCKED',
+      command,
+      ip,
+      status: 'blocked',
+      details: 'Attempted dangerous or unsupported command'
+    });
     logger.warn(`🛑 [Terminal] Blocked dangerous/unsupported command: ${command}`);
     return res.status(403).json({ error: "Command not allowed for safety reasons" });
   }
@@ -266,6 +361,14 @@ adminRouter.post("/admin/terminal", async (req, res) => {
   try {
     logger.info(`📟 [Terminal] Executing command: ${command}`);
     
+    await SecurityAuditService.logEvent({
+      chatId,
+      action: 'TERMINAL_COMMAND_EXECUTE',
+      command,
+      ip,
+      status: 'success'
+    });
+
     // Если настроен удаленный SSH-доступ, выполняем там. Если нет - локально.
     if (SSHService.isConfigured()) {
       const result = await SSHService.executeRemote(command);
@@ -294,5 +397,11 @@ adminRouter.post("/admin/terminal", async (req, res) => {
     });
   }
 });
+
+// 11. VPN Control
+// (Moved to top)
+
+// 12. VPN Commercial Client Management
+// (Moved to top)
 
 export default adminRouter;
