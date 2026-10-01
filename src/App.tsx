@@ -42,6 +42,10 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { VPNPanel } from './components/VPNPanel';
 import { AppConfig } from './types';
 import { adminApi } from './lib/adminApi';
+import { useAppStore } from './store/useAppStore';
+import { ManualModal } from './components/ManualModal';
+import { MicGuideModal } from './components/MicGuideModal';
+import { VoiceDialogueModal } from './components/VoiceDialogueModal';
 
 const MAX_BOT_URL = "https://max.ru/se13914883_bot";
 
@@ -118,23 +122,29 @@ const AVAILABLE_VOICES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'terminal' | 'vpn' | 'moderation' | 'knowledge' | 'settings'>('main');
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [voiceToast, setVoiceToast] = useState<string | null>(null);
-  const [showMicGuide, setShowMicGuide] = useState(false);
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [activeVoice, setActiveVoice] = useState<string>(() => {
-    return localStorage.getItem('selin_voice') || 'Kore';
-  });
+  const {
+    activeTab,
+    setActiveTab,
+    menuOpen,
+    setMenuOpen,
+    voiceToast,
+    setVoiceToast,
+    showMicGuide,
+    setShowMicGuide,
+    config,
+    setConfig,
+    activeVoice,
+    setActiveVoice,
+    conversationId,
+    voiceDialogue,
+    setVoiceDialogue,
+    showManual,
+    setShowManual,
+    manualTitle,
+    manualContent,
+    openManual,
+  } = useAppStore();
 
-  const [conversationId] = useState<string>(() => {
-    let id = sessionStorage.getItem('selin_conversation_id');
-    if (!id) {
-      id = 'conv_' + Math.random().toString(36).substring(2, 15);
-      sessionStorage.setItem('selin_conversation_id', id);
-    }
-    return id;
-  });
   const voiceStepRef = useRef<string>('ASK_NAME');
   const voiceUserNameRef = useRef<string>('');
 
@@ -162,18 +172,6 @@ export default function App() {
 
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  // Стейты интерактивных руководств и ИИ-Помощника
-  const [showManual, setShowManual] = useState<boolean>(false);
-  const [manualTitle, setManualTabTitle] = useState<string>('Главный Экран');
-  const [manualContent, setManualContent] = useState<string>('');
-
-  const [voiceDialogue, setVoiceDialogue] = useState<VoiceDialogueState>({
-    userText: '',
-    assistantText: '',
-    isGenerating: false,
-    isOpen: false,
-  });
 
   // Load server config on startup
   useEffect(() => {
@@ -798,9 +796,7 @@ export default function App() {
                 title = "Настройка Selin AI";
                 content = "Здесь вы задаете имя владельца, название бизнеса, язык по умолчанию и выбираете голосовой движок. Все изменения мгновенно сохраняются в локальной SQLite БД.";
               }
-              setManualTabTitle(title);
-              setManualContent(content);
-              setShowManual(true);
+              openManual(title, content);
             }}
             className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase tracking-wider hover:bg-[#D4B06A] transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#C5A059]/10 shrink-0"
           >
@@ -1104,255 +1100,20 @@ export default function App() {
       </main>
 
       {/* Voice Dialogue Modal */}
-      {voiceDialogue.isOpen && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="w-full max-w-lg bg-[#161210] border border-[#C5A059]/40 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#2A231F] pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className={`w-3 h-3 rounded-full ${voiceState === 'speaking' ? 'bg-emerald-400 animate-pulse' : 'bg-[#C5A059]'}`} />
-                <h4 className="text-sm font-bold text-[#EAE6DF]">Голосовой диалог с Selin</h4>
-              </div>
-              <button
-                onClick={() => {
-                  stopAllAudio();
-                  setVoiceDialogue((prev) => ({ ...prev, isOpen: false }));
-                }}
-                className="p-1 rounded-lg text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#221C19]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Voice Model Selector Chips */}
-            <div className="space-y-1.5 bg-[#1B1512] p-3 rounded-xl border border-[#2E241E]">
-              <div className="text-[10px] font-semibold text-[#C5A059] uppercase tracking-wider flex items-center justify-between">
-                <span>Голос Selin (Студийный AI):</span>
-                <span className="text-[#8E8478] lowercase">{AVAILABLE_VOICES.find(v => v.id === activeVoice)?.gender === 'female' ? 'женский' : 'мужской'}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {AVAILABLE_VOICES.map((v) => {
-                  const isSelected = activeVoice === v.id;
-                  return (
-                    <button
-                      key={v.id}
-                      onClick={() => {
-                        handleVoiceChange(v.id);
-                        if (voiceDialogue.assistantText) {
-                          speakText(voiceDialogue.assistantText, v.id);
-                        }
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1 ${
-                        isSelected
-                          ? 'bg-[#C5A059] text-[#0F0D0C] font-bold shadow-md shadow-[#C5A059]/20'
-                          : 'bg-[#241C18] text-[#B0A698] hover:text-white hover:bg-[#2F241F] border border-[#3A2D25]'
-                      }`}
-                    >
-                      <span>{v.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* User speech */}
-            <div className="bg-[#1F1916] border border-[#2E2521] rounded-xl p-3 space-y-1">
-              <div className="text-[10px] font-semibold text-[#C5A059] uppercase tracking-wider">Вы сказали:</div>
-              <div className="text-xs text-[#EAE6DF] font-medium leading-relaxed">{voiceDialogue.userText}</div>
-            </div>
-
-            {/* Assistant response */}
-            <div className="bg-gradient-to-br from-[#241B15] to-[#181310] border border-[#C5A059]/30 rounded-xl p-3.5 space-y-2">
-              <div className="flex items-center justify-between text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">
-                <span className="flex items-center gap-1.5">
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span>Selin отвечает ({activeVoice}):</span>
-                </span>
-                {voiceDialogue.isGenerating ? (
-                  <span className="text-[#C5A059] animate-pulse">Генерация ответа...</span>
-                ) : voiceState === 'speaking' ? (
-                  <span className="text-emerald-400 animate-pulse font-bold">Озвучивание...</span>
-                ) : null}
-              </div>
-              <div className="text-xs text-[#EAE6DF] leading-relaxed max-h-48 overflow-y-auto pr-1">
-                {voiceDialogue.assistantText || (
-                  <span className="text-[#9E958C] italic">Обрабатываю ваш запрос...</span>
-                )}
-              </div>
-
-              {/* Audio Controls */}
-              {voiceDialogue.assistantText && (
-                <div className="pt-2 flex items-center gap-2 border-t border-[#33261F]">
-                  {voiceState === 'speaking' ? (
-                    <button
-                      onClick={() => {
-                        stopAllAudio();
-                        setVoiceStateCustom('idle');
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-red-950/70 border border-red-500/40 text-red-200 text-xs font-semibold flex items-center gap-1.5 hover:bg-red-900/80 transition-all"
-                    >
-                      <VolumeX className="w-3.5 h-3.5" />
-                      <span>Остановить голос</span>
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => speakText(voiceDialogue.assistantText, activeVoice)}
-                      className="px-3 py-1.5 rounded-lg bg-[#2A201A] border border-[#C5A059]/40 text-[#EAE6DF] text-xs font-medium flex items-center gap-1.5 hover:bg-[#382B23] hover:border-[#C5A059] transition-all"
-                    >
-                      <Play className="w-3.5 h-3.5 text-[#C5A059]" />
-                      <span>Послушать ещё раз ({activeVoice})</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => {
-                  stopAllAudio();
-                  setVoiceDialogue((prev) => ({ ...prev, isOpen: false }));
-                  clearError();
-                  startRecording();
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold flex items-center justify-center gap-2 hover:bg-[#D4B06A] transition-all shadow-md"
-              >
-                <Mic className="w-4 h-4" />
-                <span>Сказать ещё</span>
-              </button>
-              <button
-                onClick={() => {
-                  stopAllAudio();
-                  setVoiceDialogue((prev) => ({ ...prev, isOpen: false }));
-                }}
-                className="px-4 py-2.5 rounded-xl bg-[#26201D] text-[#EAE6DF] text-xs font-medium hover:bg-[#322A26] border border-[#382F2A]"
-              >
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <VoiceDialogueModal
+        voiceState={voiceState}
+        onVoiceChange={handleVoiceChange}
+        onStopAudio={stopAllAudio}
+        onSpeakText={speakText}
+        onStartRecording={startRecording}
+        onClearError={clearError}
+      />
 
       {/* Microphone Permission Guide Modal */}
-      {showMicGuide && (
-        <div className="fixed inset-0 z-[1300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="w-full max-w-lg bg-[#181412] border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-5">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                  <Mic className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-base font-bold text-[#EAE6DF]">Включение микрофона</h4>
-                  <p className="text-xs text-[#9E958C]">Инструкция для Android Chrome и Safari</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowMicGuide(false)}
-                className="p-1 rounded-lg text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#221C19]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-[#C8BFAF]">
-              <div className="p-3.5 rounded-xl bg-[#221C19] border border-[#332A25] flex gap-3 items-start">
-                <div className="w-5 h-5 rounded-full bg-[#C5A059]/20 text-[#C5A059] flex items-center justify-center font-bold shrink-0 mt-0.5">
-                  1
-                </div>
-                <div>
-                  <div className="font-semibold text-[#EAE6DF]">Разрешите доступ в адресной строке</div>
-                  <div className="text-[11px] text-[#9E958C] mt-0.5">
-                    Нажмите на значок <strong className="text-amber-300">замка 🔒</strong> или <strong className="text-amber-300">настроек сайта ⚙️</strong> слева от URL браузера и выберите <strong>"Микрофон" → "Разрешить"</strong>.
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#221C19] border border-[#332A25] flex gap-3 items-start">
-                <div className="w-5 h-5 rounded-full bg-[#C5A059]/20 text-[#C5A059] flex items-center justify-center font-bold shrink-0 mt-0.5">
-                  2
-                </div>
-                <div>
-                  <div className="font-semibold text-[#EAE6DF]">Или откройте сайт в отдельной вкладке</div>
-                  <div className="text-[11px] text-[#9E958C] mt-0.5">
-                    В окне предпросмотра фрейм может блокировать микрофон. В отдельной вкладке всплывающий запрос разрешения появится моментально.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Direct Action Buttons */}
-            <div className="space-y-2 pt-2">
-              <button
-                onClick={() => {
-                  try {
-                    window.open(window.location.href, '_blank');
-                  } catch (_) {}
-                  setShowMicGuide(false);
-                }}
-                className="w-full py-3 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-[#D4B06A] transition-all shadow-lg"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>Открыть сайт в отдельной вкладке</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowMicGuide(false);
-                  clearError();
-                  startRecording();
-                }}
-                className="w-full py-2.5 rounded-xl bg-[#2A221E] text-[#EAE6DF] border border-[#3D322B] text-xs font-medium hover:bg-[#342B25] transition-all"
-              >
-                Повторить запрос микрофона сейчас
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MicGuideModal onRetry={() => { clearError(); startRecording(); }} />
 
       {/* Модальное окно суверенного мануала Selin AI */}
-      {showManual && (
-        <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
-          <div className="w-full max-w-xl bg-[#161210] border border-[#C5A059]/40 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#2A231F] pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#C5A059] animate-pulse" />
-                <h4 className="text-sm font-bold text-[#EAE6DF] uppercase tracking-wider">📖 {manualTitle}</h4>
-              </div>
-              <button
-                onClick={() => setShowManual(false)}
-                className="p-1 rounded-lg text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#221C19]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="text-xs text-[#C8BFAF] leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto pr-1">
-              {manualContent}
-            </div>
-
-            <div className="pt-2 border-t border-[#2A231F] flex justify-end gap-2">
-              <a
-                href={MAX_BOT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-[#C5A059] text-[#0F0D0C] text-xs font-bold uppercase flex items-center gap-1.5 hover:bg-[#D4B06A]"
-              >
-                <span>Перейти в MAX-бот</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-              <button
-                onClick={() => setShowManual(false)}
-                className="px-4 py-2 rounded-xl bg-[#26201D] text-[#EAE6DF] text-xs font-medium border border-[#382F2A] hover:bg-[#322A26]"
-              >
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ManualModal />
 
       {/* Интерактивный Голосовой ИИ-Помощник Настройщик (Виджет в углу) */}
       <div className="fixed bottom-6 right-6 z-[1000] animate-bounce">
