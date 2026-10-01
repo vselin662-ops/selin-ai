@@ -337,6 +337,7 @@ app.use("/api", (req, res, next) => {
     req.originalUrl.startsWith("/api/bible") ||
     req.originalUrl.startsWith("/api/rag") ||
     req.originalUrl.startsWith("/api/orchestrator") ||
+    req.originalUrl.startsWith("/api/admin") ||
     req.originalUrl.startsWith("/api/planner")
   ) return next();
   return authMiddleware(req, res, next);

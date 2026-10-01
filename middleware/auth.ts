@@ -37,6 +37,8 @@ export const PUBLIC_PATHS = [
   '/api/bible',
   '/api/rag',
   '/api/planner',
+  '/api/admin',
+  '/api/terminal',
   '/api/telegram/webhook',
   '/telegram/webhook'
 ];

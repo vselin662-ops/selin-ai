@@ -1,7 +1,12 @@
 import { Router } from "express";
 import * as pdf from "pdf-parse";
 import mammoth from "mammoth";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { sqliteDb } from "../../db";
+import { SSHService } from "../services/SSHService";
+
+const execAsync = promisify(exec);
 import {
   getCompanyConfig,
   saveCompanyConfig,
@@ -230,6 +235,64 @@ adminRouter.post(["/max/send-message", "/telegram/send-message"], async (req, re
   }
 
   return res.json({ success: true });
+});
+
+// 10. Admin Terminal (System Commands)
+adminRouter.post("/admin/terminal", async (req, res) => {
+  const { command } = req.body;
+  if (!command) return res.status(400).json({ error: "Command is required" });
+
+  // Список разрешенных безопасных команд или их префиксов
+  const allowedCommands = [
+    'ls', 'pwd', 'uptime', 'free', 'df', 'docker ps', 'docker stats', 
+    'ollama list', 'git status', 'uname', 'date', 'ps aux | grep selin',
+    'tail -n 50 logs/app.log', 'tail -n 50 logs/error.log',
+    'cd /services/selin-ai && sudo git pull',
+    'sudo git pull',
+    'sudo docker compose'
+  ];
+
+  const isAllowed = allowedCommands.some(c => command.startsWith(c));
+  
+  // Дополнительная проверка на опасные символы (блокируем ; , < , > , $ , | )
+  // Разрешаем && для цепочек и | для grep
+  const isDangerous = /[;><$]/.test(command) || (command.includes('|') && !command.includes('grep'));
+  
+  if (!isAllowed && isDangerous) {
+    logger.warn(`🛑 [Terminal] Blocked dangerous/unsupported command: ${command}`);
+    return res.status(403).json({ error: "Command not allowed for safety reasons" });
+  }
+
+  try {
+    logger.info(`📟 [Terminal] Executing command: ${command}`);
+    
+    // Если настроен удаленный SSH-доступ, выполняем там. Если нет - локально.
+    if (SSHService.isConfigured()) {
+      const result = await SSHService.executeRemote(command);
+      return res.json({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        error: result.error,
+        timestamp: new Date().toISOString(),
+        remote: true
+      });
+    }
+
+    const { stdout, stderr } = await execAsync(command, { timeout: 300000 });
+    return res.json({
+      stdout: stdout || "",
+      stderr: stderr || "",
+      timestamp: new Date().toISOString(),
+      remote: false
+    });
+  } catch (error: any) {
+    return res.json({
+      stdout: error.stdout || "",
+      stderr: error.stderr || error.message || "Unknown error",
+      code: error.code,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 export default adminRouter;

@@ -25,7 +25,8 @@ import {
   Mic,
   VolumeX,
   Play,
-  Info
+  Info,
+  Terminal as TerminalIcon
 } from 'lucide-react';
 import { GlassPanel } from './components/GlassPanel';
 import { NeonButton } from './components/NeonButton';
@@ -38,6 +39,7 @@ import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
 import { AgentStatusPanel } from './components/AgentStatusPanel';
+import { TerminalPanel } from './components/TerminalPanel';
 import { AppConfig } from './types';
 import { adminApi } from './lib/adminApi';
 
@@ -116,7 +118,7 @@ const AVAILABLE_VOICES = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'moderation' | 'knowledge' | 'settings'>('main');
+  const [activeTab, setActiveTab] = useState<'main' | 'languages' | 'business' | 'bible' | 'feed' | 'terminal' | 'moderation' | 'knowledge' | 'settings'>('main');
   const [menuOpen, setMenuOpen] = useState(false);
   const [voiceToast, setVoiceToast] = useState<string | null>(null);
   const [showMicGuide, setShowMicGuide] = useState(false);
@@ -568,6 +570,15 @@ export default function App() {
               <span>Лента штаба</span>
             </button>
             <button
+              onClick={() => { setActiveTab('terminal'); setMenuOpen(false); }}
+              className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
+                activeTab === 'terminal' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
+              }`}
+            >
+              <TerminalIcon className="w-4 h-4" />
+              <span>Терминал СВМ</span>
+            </button>
+            <button
               onClick={() => { setActiveTab('moderation'); setMenuOpen(false); }}
               className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
                 activeTab === 'moderation' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
@@ -651,6 +662,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('terminal')}
+            className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
+              activeTab === 'terminal'
+                ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold'
+                : 'bg-[#1C1715] text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#26201D]'
+            }`}
+          >
+            <TerminalIcon className="w-3.5 h-3.5" />
+            <span>Терминал СВМ</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('bible')}
             className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
               activeTab === 'bible'
@@ -713,6 +736,7 @@ export default function App() {
                 {activeTab === 'business' && 'Интеллектуальный бизнес-трекер: SMART-задачи, отчетность и симулятор продаж.'}
                 {activeTab === 'lifestyle' && 'Автоматизация быта (такси, еда, отели) голосовыми командами.'}
                 {activeTab === 'feed' && 'Живой логгер и пульт HITL (утверждение ответов ИИ перед отправкой клиентам).'}
+                {activeTab === 'terminal' && 'Прямой доступ к ядру СВМ: выполнение системных команд, мониторинг ресурсов и логи сервера.'}
                 {activeTab === 'bible' && 'Духовный трекер: План Победы, рассылка псалмов, молитв и утренний брифинг.'}
                 {activeTab === 'moderation' && 'Панель модерации контента и управление поведением нейросети.'}
                 {activeTab === 'knowledge' && 'Локальный суверенный поисковик и база знаний проекта (без передачи данных в США).'}
@@ -788,7 +812,7 @@ export default function App() {
                     <ExternalLink className="w-4 h-4" />
                   </a>
                   <button
-                    onClick={() => setActiveTab('feed')}
+                    onClick={() => setActiveTab('terminal')}
                     className="px-6 py-3 rounded-xl bg-[#26201D] text-[#EAE6DF] border border-[#382F2A] font-semibold text-xs hover:border-[#C5A059]/40 transition-all"
                   >
                     Консоль Ядра
@@ -1029,6 +1053,7 @@ export default function App() {
 
         {/* PANELS FROM HEADQUARTERS */}
         {activeTab === 'feed' && <StaffFeed />}
+        {activeTab === 'terminal' && <TerminalPanel />}
         {activeTab === 'bible' && <BibleTrackerPanel />}
         {activeTab === 'moderation' && <ModerationPanel />}
         {activeTab === 'knowledge' && <KnowledgeBasePanel />}
