@@ -1,7 +1,9 @@
+import dotenv from "dotenv";
+dotenv.config({ override: true });
+
 import express from "express";
 import cors from "cors";
 import path from "path";
-import dotenv from "dotenv";
 
 // 0. Global Process Error Handlers - Log full stack and keep process alive
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
@@ -98,7 +100,6 @@ import { startMorningScheduler } from "./src/services/planning/morningBriefing";
 import { SecurityGateway } from "./src/core/SecurityGateway";
 import helmet from "helmet";
 
-dotenv.config({ override: true });
 process.env.IMAGE_EDIT = "0";
 process.env.STRESS_FIX = "0";
 checkRequiredEnvVars();
