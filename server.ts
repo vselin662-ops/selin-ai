@@ -6,10 +6,21 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Поиск .env файла в текущей папке или на уровень выше (для поддержки скомпилированной папки dist)
-let envPath = path.resolve(__dirname, ".env");
-if (!fs.existsSync(envPath)) {
-  envPath = path.resolve(__dirname, "..", ".env");
+// Поиск .env файла в нескольких возможных местах для максимальной совместимости
+const possiblePaths = [
+  path.resolve(__dirname, ".env"),
+  path.resolve(__dirname, "..", ".env"),
+  path.resolve(__dirname, "..", "..", ".env"),
+  path.resolve(__dirname, "..", "..", "..", ".env"),
+  path.join(process.env.HOME || "/home/ubuntu", ".env")
+];
+
+let envPath = possiblePaths[0];
+for (const p of possiblePaths) {
+  if (fs.existsSync(p)) {
+    envPath = p;
+    break;
+  }
 }
 
 dotenv.config({ path: envPath, override: true });
