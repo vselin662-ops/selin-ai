@@ -25,8 +25,9 @@ echo "📦 Подключение репозитория Amnezia PPA..."
 sudo add-apt-repository -y ppa:amnezia/ppa
 sudo apt-get update -y
 
-echo "📦 Установка заголовков ядра и AmneziaWG..."
+echo "📦 Установка заголовков ядра, утилит разрешения DNS (resolvconf) и AmneziaWG..."
 sudo apt-get install -y linux-headers-$(uname -r) || true
+sudo apt-get install -y resolvconf || sudo apt-get install -y openresolv || true
 sudo apt-get install -y amneziawg || sudo apt-get install -y amneziawg-tools
 
 # 3. Извлечение ключей из wgcf-profile.conf или использование встроенных резервных
