@@ -79,6 +79,7 @@ try {
       client_name TEXT NOT NULL,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
+      uuid TEXT,
       plan TEXT DEFAULT 'standard',
       status TEXT DEFAULT 'active',
       bytes_limit INTEGER DEFAULT -1,
@@ -87,11 +88,13 @@ try {
       created_at TEXT NOT NULL
     );
 
+    try { sqliteDb.exec("ALTER TABLE vpn_clients ADD COLUMN uuid TEXT"); } catch (_) {}
+
     CREATE INDEX IF NOT EXISTS idx_vpn_clients_chat ON vpn_clients(chat_id);
     CREATE INDEX IF NOT EXISTS idx_vpn_clients_user ON vpn_clients(username);
 
-    INSERT OR IGNORE INTO vpn_clients (id, chat_id, client_name, username, password, plan, status, created_at)
-    VALUES ('vpn_test_01', 'test_user', 'Vasya Bobruisk', 'selin_08wn9', 'cfmw7d3a', 'annual_500', 'active', datetime('now'));
+    INSERT OR IGNORE INTO vpn_clients (id, chat_id, client_name, username, password, uuid, plan, status, created_at)
+    VALUES ('vpn_test_01', 'test_user', 'Vasya Bobruisk', 'selin_08wn9', 'cfmw7d3a', 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d', 'annual_500', 'active', datetime('now'));
 
     -- Core Autonomous Intelligence Tables
     CREATE TABLE IF NOT EXISTS memory_long_term (

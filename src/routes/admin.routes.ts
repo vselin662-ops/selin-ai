@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "crypto";
 import * as pdf from "pdf-parse";
 import mammoth from "mammoth";
 import { exec } from "child_process";
@@ -74,16 +75,17 @@ adminRouter.post("/admin/vpn-clients", (req, res) => {
   const id = `vpn_${Date.now()}`;
   const username = `selin_${Math.random().toString(36).substring(2, 7)}`;
   const password = Math.random().toString(36).substring(2, 10);
+  const uuid = crypto.randomUUID();
   const now = new Date().toISOString();
 
   try {
     sqliteDb.prepare(`
-      INSERT INTO vpn_clients (id, client_name, username, password, plan, status, expires_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, client_name, username, password, plan || 'standard', 'active', expires_at || null, now);
+      INSERT INTO vpn_clients (id, client_name, username, password, uuid, plan, status, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, client_name, username, password, uuid, plan || 'standard', 'active', expires_at || null, now);
 
     logFeedEvent("security", "vpn", "Новый клиент VPN", client_name, "success");
-    return res.json({ success: true, client: { id, client_name, username, password } });
+    return res.json({ success: true, client: { id, client_name, username, password, uuid } });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

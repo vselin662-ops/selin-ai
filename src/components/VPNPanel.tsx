@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, ShieldCheck, ShieldAlert, Activity, Database, Globe, Lock, Power, RefreshCw, Zap, Users, UserPlus, Copy, Trash2, Key, ChevronRight, QrCode, Download, Share2, ExternalLink as ExternalIcon, X } from 'lucide-react';
+import { Shield, ShieldCheck, ShieldAlert, Activity, Database, Globe, Lock, Power, RefreshCw, Zap, Users, UserPlus, Copy, Trash2, Key, ChevronRight, QrCode, Download, Share2, ExternalLink as ExternalIcon, X, Smartphone, Check } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
+import { ProtocolGenerator } from '../services/network/ProtocolGenerator';
 import QRCode from 'qrcode';
 
 interface VPNStatus {
@@ -17,6 +18,7 @@ interface VPNClients {
   client_name: string;
   username: string;
   password: string;
+  uuid?: string;
   plan: string;
   status: string;
   bytes_used: number;
@@ -30,6 +32,8 @@ export const VPNPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [targetPort, setTargetPort] = useState(1080);
+  const [serverHost, setServerHost] = useState('176.108.252.111');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   
@@ -78,15 +82,35 @@ export const VPNPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeSubTab]);
 
+  const generateVlessLink = (client: VPNClients) => {
+    const uuid = client.uuid || 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
+    return ProtocolGenerator.generateVLESS({
+      uuid,
+      serverIp: serverHost || '176.108.252.111',
+      port: 443,
+      clientName: client.client_name || 'Vasya'
+    });
+  };
+
+  const generateShadowsocksLink = (client: VPNClients) => {
+    return ProtocolGenerator.generateShadowsocks({
+      method: 'chacha20-ietf-poly1305',
+      password: client.password,
+      serverIp: serverHost || '176.108.252.111',
+      port: 8388,
+      clientName: client.client_name || 'Vasya'
+    });
+  };
+
   const generateSocksLink = (client: VPNClients) => {
-    const host = window.location.hostname;
+    const host = serverHost || window.location.hostname;
     const port = status?.port || 1080;
     const name = encodeURIComponent(`SelinAI_${client.client_name}`);
     return `socks5://${client.username}:${client.password}@${host}:${port}#${name}`;
   };
 
   const handleShowQR = async (client: VPNClients) => {
-    const link = generateSocksLink(client);
+    const link = generateVlessLink(client);
     try {
       const url = await QRCode.toDataURL(link, {
         width: 400,
@@ -301,19 +325,31 @@ export const VPNPanel: React.FC = () => {
         </>
       ) : (
         <div className="space-y-6">
-          {/* Clients List Header */}
-          <div className="flex items-center justify-between">
+          {/* Clients List Header with Server IP setting */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
             <div>
-              <h3 className="text-xl font-bold text-white">Управление доступом</h3>
-              <p className="text-xs text-slate-500">Список проданных доступов и статистика использования</p>
+              <h3 className="text-xl font-bold text-white">Управление доступом (VLESS & Happ)</h3>
+              <p className="text-xs text-slate-500">Генерация реальных ключей для Happ, v2rayNG, Shadowrocket</p>
             </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20"
-            >
-              <UserPlus className="w-4 h-4" />
-              ПРОДАТЬ ДОСТУП (КЛЮЧ)
-            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                <span className="text-[10px] uppercase font-bold text-slate-400">IP Сервера (ВМ):</span>
+                <input
+                  type="text"
+                  value={serverHost}
+                  onChange={(e) => setServerHost(e.target.value)}
+                  className="bg-transparent text-emerald-400 text-xs font-mono font-bold focus:outline-none w-32"
+                  placeholder="176.108.252.111"
+                />
+              </div>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20"
+              >
+                <UserPlus className="w-4 h-4" />
+                СОЗДАТЬ КЛЮЧ
+              </button>
+            </div>
           </div>
 
           {/* Clients Table */}
@@ -322,7 +358,7 @@ export const VPNPanel: React.FC = () => {
               <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-800">
                 <tr>
                   <th className="px-6 py-4 font-bold uppercase tracking-wider">Клиент</th>
-                  <th className="px-6 py-4 font-bold uppercase tracking-wider">Учетные данные (SOCKS5)</th>
+                  <th className="px-6 py-4 font-bold uppercase tracking-wider">Ключи подключения (Happ / VLESS)</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-wider">Трафик</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-wider">Статус</th>
                   <th className="px-6 py-4 font-bold uppercase tracking-wider">Действия</th>
@@ -336,63 +372,74 @@ export const VPNPanel: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  clients.map((client) => (
-                    <tr key={client.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-white">{client.client_name}</div>
-                        <div className="text-[10px] text-slate-500">ID: {client.id.split('_')[1]}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col gap-2">
+                  clients.map((client) => {
+                    const isCopied = copiedId === client.id;
+                    const vlessUrl = generateVlessLink(client);
+
+                    return (
+                      <tr key={client.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-white">{client.client_name}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">UUID: {(client.uuid || client.id).slice(0, 18)}...</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                              {/* Main 1-click button for Happ */}
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(vlessUrl);
+                                  setCopiedId(client.id);
+                                  setTimeout(() => setCopiedId(null), 2500);
+                                }}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                                  isCopied 
+                                    ? 'bg-emerald-500 text-white' 
+                                    : 'bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30'
+                                }`}
+                                title="Скопировать VLESS ссылку для импорта в Happ в 1 клик"
+                              >
+                                {isCopied ? <Check className="w-3.5 h-3.5" /> : <Smartphone className="w-3.5 h-3.5" />}
+                                {isCopied ? 'СКОПИРОВАНО ДЛЯ HAPP!' : 'СКОПИРОВАТЬ ДЛЯ HAPP (VLESS)'}
+                              </button>
+
+                              <button
+                                onClick={() => handleShowQR(client)}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 transition-all font-bold"
+                                title="Показать QR-код для сканирования с телефона"
+                              >
+                                <QrCode className="w-3.5 h-3.5" />
+                                QR
+                              </button>
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono truncate max-w-xs">
+                              {vlessUrl.slice(0, 45)}...
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-white font-medium">{formatBytes(client.bytes_used)}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            client.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                          }`}>
+                            {client.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleShowQR(client)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all font-bold"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                              УМНАЯ ССЫЛКА (QR)
-                            </button>
                             <button 
-                              onClick={() => {
-                                navigator.clipboard.writeText(generateSocksLink(client));
-                                alert('Ссылка ss:// скопирована!');
-                              }}
-                              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-                              title="Скопировать ссылку"
+                              onClick={() => handleDeleteClient(client.id)}
+                              className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-rose-400 hover:bg-rose-400/10 transition-all"
                             >
-                              <Copy className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <div className="flex items-center gap-2 bg-slate-800 px-2 py-1 rounded border border-slate-700 w-fit">
-                            <span className="text-slate-400 font-mono text-[10px]">{client.username}:{client.password}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-white font-medium">{formatBytes(client.bytes_used)}</div>
-                        <div className="w-24 h-1.5 bg-slate-800 rounded-full mt-1.5 overflow-hidden">
-                          <div className="h-full bg-blue-500 w-1/3 opacity-50" />
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          client.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
-                        }`}>
-                          {client.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => handleDeleteClient(client.id)}
-                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-rose-400 hover:bg-rose-400/10 transition-all"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -421,18 +468,17 @@ export const VPNPanel: React.FC = () => {
             <div className="space-y-3">
               <button 
                 onClick={() => {
-                  navigator.clipboard.writeText(generateSocksLink(showQRModal));
-                  alert('Ссылка скопирована!');
+                  navigator.clipboard.writeText(generateVlessLink(showQRModal));
+                  alert('VLESS ссылка для Happ скопирована!');
                 }}
                 className="w-full py-4 rounded-2xl bg-[#0F0D0C] text-[#EAE6DF] font-bold flex items-center justify-center gap-3 hover:scale-[1.02] transition-transform shadow-xl"
               >
                 <Share2 className="w-5 h-5" />
-                СКОПИРОВАТЬ ССЫЛКУ
+                СКОПИРОВАТЬ ДЛЯ HAPP (VLESS)
               </button>
               <div className="p-4 bg-slate-100 rounded-2xl text-[10px] text-slate-500 font-bold uppercase leading-relaxed">
-                Отправьте этот QR или ссылку клиенту.<br/>
-                Он может открыть её в приложениях:<br/>
-                <span className="text-[#0F0D0C]">Hiddify, Shadowrocket, Nekobox</span>
+                Отсканируйте QR или вставьте ссылку в приложениях:<br/>
+                <span className="text-[#0F0D0C] font-black">Happ, v2rayNG, Shadowrocket, NekoBox, Sing-box</span>
               </div>
             </div>
           </div>
