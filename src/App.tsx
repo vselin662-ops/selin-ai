@@ -38,7 +38,6 @@ import { VoiceButton } from './components/VoiceButton';
 import { useVoiceRecorder } from './hooks/useVoiceRecorder';
 import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
-import { AgentStatusPanel } from './components/AgentStatusPanel';
 import { TerminalPanel } from './components/TerminalPanel';
 import { VPNPanel } from './components/VPNPanel';
 import { AppConfig } from './types';
@@ -959,9 +958,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-
-            {/* AI Agents Live Status & Queue Load Monitor */}
-            <AgentStatusPanel />
           </div>
         )}
 
