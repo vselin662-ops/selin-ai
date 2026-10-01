@@ -1,9 +1,14 @@
 import dotenv from "dotenv";
-dotenv.config({ override: true });
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, ".env"), override: true });
 
 import express from "express";
 import cors from "cors";
-import path from "path";
 
 // 0. Global Process Error Handlers - Log full stack and keep process alive
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
