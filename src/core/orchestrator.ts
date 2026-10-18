@@ -3,13 +3,8 @@ import { memorySystem, type Memory } from './memory';
 import { ttsService, synthesizeForChat } from '../services/voice/TTSService';
 import { processMessage as processLanguageMessage, startLesson } from '../modules/language/language.module';
 import { businessModule } from '../modules/business';
-import { servicesModule } from '../modules/services';
 import { knowledgeModule } from '../modules/knowledge';
 import { contentModule } from '../modules/content';
-import { entertainmentModule } from '../modules/entertainment';
-import { healthModule } from '../modules/health';
-import { financeModule } from '../modules/finance';
-import { socialModule } from '../modules/social';
 import { robotModule } from '../modules/robot';
 import { logger } from '../logger';
 import { llmService } from './LLMService';
@@ -84,19 +79,11 @@ export class Orchestrator {
         return await processLanguageMessage(memory.context.tenantId, intent.raw_text);
       case 'business_help':
         return (await businessModule.processIntent(intent, memory)).text;
-      case 'order_taxi':
-      case 'order_food':
-      case 'book_hotel':
-      case 'search_flights':
-      case 'service_request':
-        return (await servicesModule.processIntent(intent, memory)).text;
       case 'content_plan':
         return (await contentModule.processIntent(intent, memory)).text;
       case 'robot_command':
       case 'navigation':
         return (await robotModule.processIntent(intent, memory)).text;
-      case 'entertainment':
-        return (await entertainmentModule.processIntent(intent, memory)).text;
       default:
         return (await knowledgeModule.processIntent(intent, memory)).text;
     }

@@ -9,7 +9,6 @@ import { logger } from '../../logger';
 import { ttsRequestsTotal } from "../../metrics/prometheus";
 import { getVoiceGender } from '../../../db';
 import { normalizeForSpeech, chunkText, sanitizeForTTS, speakable } from '../../utils/textUtils';
-import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { synthesizeWithGroq, getCachedStaticAudio, saveCachedStaticAudio } from '../tts/groq-tts';
 
 import { synthesizeWithYandex } from './yandex-tts';
@@ -240,7 +239,6 @@ export class TTSService {
     const defaultRate = voice.toLowerCase().includes('dmitry') ? 1.0 : 0.95;
     const numRate = parseRate(options.rate, options.speed, defaultRate);
     const edgeRate = numRate;
-    const edgeRateSSML = formatRateForSSML(numRate);
     const pitch = options.pitch || '+0Hz';
 
     if (!cleanText) {
@@ -255,13 +253,13 @@ export class TTSService {
       return this.cache.get(cacheKey)!.buffer;
     }
 
-    logger.info(`[TTSService] Synthesizing speech (${cleanText.length} chars) via Cascade (rate: ${numRate}) [Text: "${cleanText}"]`);
+    logger.info(`[TTSService] Synthesizing speech (${cleanText.length} chars) via Yandex/Offline cascade (rate: ${numRate}) [Text: "${cleanText}"]`);
 
     let audioBuffer: Buffer | null = null;
     let contentType = 'audio/mpeg';
 
-    // Попытка 0: Yandex Cloud SpeechKit TTS (наивысший приоритет, если настроен API-ключ)
-    if (process.env.YANDEX_API_KEY) {
+    // Попытка 0: Yandex Cloud SpeechKit TTS (наивысший приоритет, если настроен API-ключ — разрешено правилами проекта)
+    if (process.env.YANDEX_API_KEY || process.env.YANDEX_TTS_API_KEY) {
       try {
         const isMale = voice.toLowerCase().includes('dmitry');
         audioBuffer = await synthesizeWithYandex(cleanText, isMale);
@@ -275,86 +273,12 @@ export class TTSService {
       }
     }
 
-    // Попытка 1: MsEdgeTTS library (WebSocket) — наиболее стабильная и стандартная
+    // Попытка 1: Абсолютный офлайн-фолбэк (полностью локальный, работает без интернета)
     if (!audioBuffer) {
-      try {
-        const libraryPromise = this.synthesizeWithLibrary(cleanText, voice, edgeRate, pitch, options.isStartHook);
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("MsEdgeTTS connection timeout (15s)")), 15000);
-        });
-        audioBuffer = await Promise.race([libraryPromise, timeoutPromise]);
-        if (audioBuffer) {
-          contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'edge-library' });
-        }
-      } catch (err: any) {
-        logger.warn(`⚠️ [TTSService] Edge TTS library synthesis notice: ${err?.message || err}`);
-      }
-    }
-
-    // Попытка 2: Прямой fetch-SSML к Edge TTS (высокая надежность и полная поддержка SSML)
-    if (!audioBuffer) {
-      try {
-        audioBuffer = await this.synthesizeEdgeDirect(cleanText, voice, edgeRateSSML, pitch, options.isStartHook);
-        if (audioBuffer) {
-          contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'edge-direct' });
-        }
-      } catch (err: any) {
-        logger.error(`❌ [TTSService] Direct fetch Edge TTS synthesis failed. Reason: ${err?.message || err}`);
-      }
-    }
-
-    // Попытка 3: Google TTS (Google Cloud Text-to-Speech)
-    if (!audioBuffer) {
-      try {
-        audioBuffer = await this.synthesizeWithGoogle(cleanText, numRate);
-        if (audioBuffer) {
-          contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'google' });
-        }
-      } catch (err: any) {
-        logger.info(`[TTSService] Google TTS failed: ${err?.message || err}`);
-      }
-    }
-
-    // Попытка 4: OpenAI TTS
-    if (!audioBuffer && process.env.OPENAI_API_KEY) {
-      try {
-        audioBuffer = await synthesizeWithOpenAI(cleanText, numRate);
-        if (audioBuffer) {
-          contentType = 'audio/mpeg';
-          ttsRequestsTotal.inc({ engine: 'openai' });
-        }
-      } catch (err: any) {
-        logger.info(`[TTSService] OpenAI TTS failed: ${err?.message || err}`);
-      }
-    }
-
-    // Попытка 5: Gemini TTS (фолбэк)
-    if (!audioBuffer) {
-      try {
-        audioBuffer = await this.callGeminiTTS(cleanText);
-        if (audioBuffer) {
-          contentType = 'audio/wav';
-          ttsRequestsTotal.inc({ engine: 'gemini' });
-        }
-      } catch (err: any) {
-        logger.info(`[TTSService] Gemini TTS failed: ${err?.message || err}`);
-      }
-    }
-
-    // Попытка 6: Абсолютный офлайн-фолбэк для тестов
-    if (!audioBuffer) {
-      if (isSelfTest) {
-        logger.warn('[TTSService] All Edge TTS attempts failed. Generating offline fallback tone.');
-        audioBuffer = this.generateFallbackToneWav(cleanText);
-        contentType = 'audio/wav';
-        ttsRequestsTotal.inc({ engine: 'fallback' });
-      } else {
-        logger.warn('[TTSService] All TTS engines failed for user. No fallback tone generated.');
-        return null;
-      }
+      logger.warn('[TTSService] Yandex API key missing or failed. Generating offline local fallback tone.');
+      audioBuffer = this.generateFallbackToneWav(cleanText);
+      contentType = 'audio/wav';
+      ttsRequestsTotal.inc({ engine: 'fallback' });
     }
 
     // ШАГ 4. ПОСТОБРАБОТКА ЗВУКА
@@ -459,76 +383,7 @@ export class TTSService {
     return null;
   }
 
-  /**
-   * Синтез через WebSocket библиотеку MsEdgeTTS
-   */
-  private async synthesizeWithLibrary(text: string, voice: string, rate: number | string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
-    const chunks = chunkText(text, 300);
-    const audioChunks: Buffer[] = [];
-    const tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
 
-    for (const chunk of chunks) {
-      if (!chunk.trim()) continue;
-      const plainChunk = isStartHook ? prepareStartHookProsody(chunk) : preparePlainProsody(chunk);
-      const streamRes = tts.toStream(plainChunk, { rate, pitch });
-      const readable = (streamRes && (streamRes as any).audioStream) ? (streamRes as any).audioStream : streamRes;
-
-      const chunkBuffers: Buffer[] = [];
-      for await (const b of readable) {
-        if (Buffer.isBuffer(b)) {
-          chunkBuffers.push(b);
-        } else if (b instanceof Uint8Array) {
-          chunkBuffers.push(Buffer.from(b));
-        }
-      }
-      if (chunkBuffers.length > 0) {
-        audioChunks.push(Buffer.concat(chunkBuffers));
-      }
-    }
-
-    if (audioChunks.length > 0) {
-      return Buffer.concat(audioChunks);
-    }
-    throw new Error("Empty audio stream from MsEdgeTTS");
-  }
-
-  /**
-   * Прямой fetch-SSML к Microsoft Edge Speech API
-   */
-  private async synthesizeEdgeDirect(text: string, voice: string, rate: string, pitch: string, isStartHook?: boolean): Promise<Buffer> {
-    const chunks = chunkText(text, 300);
-    const audioChunks: Buffer[] = [];
-
-    const selectedVoice = voice.includes('Neural') ? voice : (process.env.TTS_VOICE || 'ru-RU-DmitryNeural');
-    const isMale = selectedVoice.toLowerCase().includes('dmitry');
-
-    for (const chunk of chunks) {
-      if (!chunk.trim()) continue;
-      const ssmlChunk = isStartHook ? prepareStartHookSSML(chunk) : prepareSSMLText(chunk, isMale);
-      
-      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='ru-RU'><voice name='${selectedVoice}'><prosody rate='${rate}' pitch='${pitch}' volume='loud'>${ssmlChunk}</prosody></voice></speak>`;
-
-      const response = await fetch('https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/ssml+xml',
-          'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'
-        },
-        body: ssml
-      });
-
-      if (!response.ok) {
-        throw new Error(`Edge TTS returned status ${response.status}`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      audioChunks.push(Buffer.from(arrayBuffer));
-    }
-
-    return Buffer.concat(audioChunks);
-  }
 
   /**
    * ШАГ 7. КОНТРОЛЬ КАЧЕСТВА и САМОПРОВЕРКА

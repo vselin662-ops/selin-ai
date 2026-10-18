@@ -37,26 +37,6 @@ class AgentQueueService {
   private initDefaultAgents(): void {
     const defaultList: AgentStatusInfo[] = [
       {
-        id: "order",
-        code: "OrderAgent",
-        name: "Агент заказов & расчётов",
-        role: "Приём заказов, валидация позиций, расчёт Smart Fee Matrix и оформление счетов",
-        category: "Коммерция & Доставка",
-        status: "online",
-        queueCount: 2,
-        maxCapacity: 10,
-        activeTask: "Расчёт динамического тарифа для заказа #2481",
-        completedToday: 47,
-        latencyMs: 32,
-        uptimePercent: 99.8,
-        lastActive: "Только что",
-        capabilities: ["Smart Fee Matrix", "E-commerce чеки", "Скидки на объём"],
-        queuedTasks: [
-          { id: "task_ord_1", title: "Верификация позиций корзины пользователя", priority: "high", createdAt: Date.now() - 45000, source: "Telegram" },
-          { id: "task_ord_2", title: "Применение промокода и расчёт доставки", priority: "medium", createdAt: Date.now() - 20000, source: "Web" }
-        ]
-      },
-      {
         id: "sales",
         code: "SalesAgent",
         name: "Отдел продаж & CRM",
@@ -168,25 +148,6 @@ class AgentQueueService {
         lastActive: "3 мин назад",
         capabilities: ["Алгоритм SM-2", "Shadowing", "Разбор ошибок"],
         queuedTasks: []
-      },
-      {
-        id: "travel",
-        code: "TravelAgent",
-        name: "Консьерж Поездок & Логист",
-        role: "Поиск оптимальных авиарейсов, подбор отелей, построение логистики и маршрутов",
-        category: "Туризм & Поездки",
-        status: "online",
-        queueCount: 1,
-        maxCapacity: 8,
-        activeTask: "Мониторинг билетов по маршруту Москва — Сочи",
-        completedToday: 19,
-        latencyMs: 60,
-        uptimePercent: 99.5,
-        lastActive: "5 мин назад",
-        capabilities: ["Авиапоиск", "Бронирование отелей", "Трансферы"],
-        queuedTasks: [
-          { id: "task_trv_1", title: "Поиск отелей 4* в центре с высоким рейтингом", priority: "medium", createdAt: Date.now() - 40000, source: "Max Bot" }
-        ]
       },
       {
         id: "news",

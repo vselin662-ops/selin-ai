@@ -3,6 +3,7 @@ import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
 import { SelinCore } from '../../../core/SelinCore';
 import { ChannelType } from '../../../core/types';
+import { getVoiceModePreference } from '../../../../db';
 
 export class DefaultLLMHandler implements IMessageHandler {
   public readonly name = 'DefaultLLMHandler';
@@ -28,10 +29,12 @@ export class DefaultLLMHandler implements IMessageHandler {
       });
 
       const replyText = response?.text || 'Извините, не удалось сформировать ответ.';
+      const isVoicePreferred = getVoiceModePreference(ctx.chatId) === 'voice';
+
       return {
         handled: true,
         replyText,
-        voiceText: ctx.isVoiceInput ? replyText : undefined
+        voiceText: (ctx.isVoiceInput || isVoicePreferred) ? replyText : undefined
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

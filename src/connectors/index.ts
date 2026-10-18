@@ -1,14 +1,8 @@
 import { BaseConnector, ConnectorResponse } from "./base";
-import { TaxiConnector } from "./taxi.connector";
-import { FoodDeliveryConnector } from "./food.connector";
-import { TravelConnector } from "./travel.connector";
 import { InstagramConnector } from "./instagram.connector";
 import { BusinessPlanConnector } from "./business-plan.connector";
 
 export * from "./base";
-export * from "./taxi.connector";
-export * from "./food.connector";
-export * from "./travel.connector";
 export * from "./instagram.connector";
 export * from "./business-plan.connector";
 
@@ -16,9 +10,6 @@ export class ConnectorRegistry {
   private connectors = new Map<string, BaseConnector>();
 
   constructor() {
-    this.register(new TaxiConnector());
-    this.register(new FoodDeliveryConnector());
-    this.register(new TravelConnector());
     this.register(new InstagramConnector());
     this.register(new BusinessPlanConnector());
   }

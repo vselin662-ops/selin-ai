@@ -1,6 +1,7 @@
 // src/adapters/max/handlers/VoiceModeHandler.ts
 import { IMessageHandler, HandlerContext, HandlerResult } from '../types';
 import { logger } from '../../../logger';
+import { setVoiceModePreference, setVoiceGender } from '../../../../db';
 
 export class VoiceModeHandler implements IMessageHandler {
   public readonly name = 'VoiceModeHandler';
@@ -25,6 +26,10 @@ export class VoiceModeHandler implements IMessageHandler {
       const text = ctx.lowerText;
 
       if (text === 'голос вкл' || text === '/voice on' || text === 'селин777') {
+        setVoiceModePreference(ctx.chatId, 'voice');
+        if (text === 'селин777') {
+          setVoiceGender(ctx.chatId, 'male', 1);
+        }
         return {
           handled: true,
           replyText: '🔊 Голосовые ответы включены (Режим: Активен).',
@@ -33,6 +38,10 @@ export class VoiceModeHandler implements IMessageHandler {
       }
 
       if (text === 'голос выкл' || text === '/voice off' || text === 'селин000') {
+        setVoiceModePreference(ctx.chatId, 'text');
+        if (text === 'селин000') {
+          setVoiceGender(ctx.chatId, 'female', 1);
+        }
         return {
           handled: true,
           replyText: '🔇 Голосовые ответы отключены (Режим: Текст).'
@@ -40,6 +49,7 @@ export class VoiceModeHandler implements IMessageHandler {
       }
 
       if (text === 'голос мужской') {
+        setVoiceGender(ctx.chatId, 'male', 1);
         return {
           handled: true,
           replyText: '🎙 Установлен мужской голос озвучивания (Дмитрий).',
@@ -48,6 +58,7 @@ export class VoiceModeHandler implements IMessageHandler {
       }
 
       if (text === 'голос женский') {
+        setVoiceGender(ctx.chatId, 'female', 1);
         return {
           handled: true,
           replyText: '🎙 Установлен женский голос озвучивания (Светлана).',

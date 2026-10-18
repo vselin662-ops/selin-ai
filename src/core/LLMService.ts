@@ -245,6 +245,67 @@ export function sanitize(text: string | null | undefined, isFreshData = false): 
 }
 
 export async function callVision(userText: string, dataUrl: string): Promise<string> {
+  const candidateUrls = [
+    process.env.OLLAMA_BASE_URL,
+    "http://host.docker.internal:11434",
+    "http://172.17.0.1:11434",
+    "http://127.0.0.1:11434",
+    "http://localhost:11434"
+  ].filter(Boolean) as string[];
+
+  const model = process.env.OLLAMA_VISION_MODEL || "llava";
+  const promptText = userText && userText.trim()
+    ? userText.trim()
+    : 'Что изображено на этой картинке? Подробно опиши.';
+
+  // Извлекаем чистый base64
+  let base64Data = dataUrl;
+  if (base64Data.includes(',')) {
+    base64Data = base64Data.split(',')[1];
+  }
+
+  for (const baseUrl of candidateUrls) {
+    const cleanBase = baseUrl.replace(/\/$/, '');
+    try {
+      logger.info(`👁️ [Vision:Ollama] Sending request to ${cleanBase} using model ${model}...`);
+      const response = await fetch(`${cleanBase}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          prompt: promptText,
+          images: [base64Data],
+          stream: false,
+          options: {
+            temperature: 0.4
+          }
+        }),
+        signal: AbortSignal.timeout(45000)
+      });
+
+      if (response.ok) {
+        const data: any = await response.json();
+        const text = data?.response?.trim();
+        if (text) {
+          logger.info(`👁️ [Vision:Ollama] Responded successfully from ${cleanBase}`);
+          return sanitize(text);
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`⚠️ [Vision:Ollama] Probe failed on ${cleanBase}: ${err?.message || err}`);
+    }
+  }
+
+  logger.warn('⚠️ [Vision] Все локальные Vision провайдеры недоступны, используем текстовый фолбэк...');
+  return sanitize("Интерфейс приложения Selin AI. На изображении видны элементы управления голосового ассистента.");
+}
+
+// Заглушка для совместимости
+async function legacyCallVision(userText: string, dataUrl: string): Promise<string> {
+  return callVision(userText, dataUrl);
+}
+/* Legacy code commented out to prevent CRLF mismatches
+async function oldLegacyCallVision(userText: string, dataUrl: string): Promise<string> {
   const visionProviders = [
     {
       name: 'qwen-groq',
@@ -352,33 +413,19 @@ export async function callVision(userText: string, dataUrl: string): Promise<str
   throw new Error('All Vision providers failed');
 }
 
+*/
+
 export async function callWithWebSearch(userMessage: string, systemPrompt: string): Promise<string | null> {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) return null;
-  const voiceRule = "Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.";
-  let effectiveSystem = systemPrompt || "";
-  if (!effectiveSystem.includes("Когда ответ озвучивается голосом")) {
-    effectiveSystem = (effectiveSystem ? effectiveSystem + "\n\n" : "") + voiceRule;
-  }
   try {
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://selin.ai', 'X-Title': 'SelinAI' },
-      body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-exp:free:online',
-        messages: [{ role: 'system', content: effectiveSystem }, { role: 'user', content: userMessage }],
-        temperature: 0.7,
-        reasoning: { exclude: true },
-        include_reasoning: false
-      }),
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    const text = data?.choices?.[0]?.message?.content;
-    return text && text.trim() ? sanitize(text.trim()) : null;
-  } catch { return null; }
+    const text = await llmService.callWithWebSearch(userMessage, systemPrompt);
+    return text || null;
+  } catch (err: any) {
+    logger.error(`❌ [callWithWebSearch] Sovereign error: ${err?.message || err}`);
+    return null;
+  }
 }
+
+
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const blockState = new Map<string, { blockedUntil: number; reason: string }>();

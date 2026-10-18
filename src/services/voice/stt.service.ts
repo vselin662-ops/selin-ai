@@ -16,6 +16,36 @@ export class STTService {
       return '';
     }
 
+    // 0. Высокоприоритетный путь: Yandex Cloud SpeechKit STT (полностью разрешено и поддерживается)
+    const yandexApiKey = process.env.YANDEX_API_KEY || process.env.YANDEX_STT_API_KEY;
+    if (yandexApiKey) {
+      try {
+        const response = await fetch('https://stt.api.cloud.yandex.net/speech/v1/stt:recognize?topic=general&lang=ru-RU', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Api-Key ${yandexApiKey.trim()}`,
+            'Content-Type': 'audio/ogg'
+          },
+          body: audioBuffer,
+          signal: AbortSignal.timeout(15000)
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = this.cleanWhisperHallucinations((data?.result || '').trim());
+          if (text) {
+            logger.info(`🇷🇺 [STT:YandexSpeechKit] Transcribed: "${text.substring(0, 50)}..."`);
+            return text;
+          }
+        } else {
+          const errBody = await response.text();
+          logger.warn(`⚠️ [STT:YandexSpeechKit] HTTP ${response.status}: ${errBody}`);
+        }
+      } catch (err: any) {
+        logger.warn(`⚠️ [STT:YandexSpeechKit] Network or API error: ${err?.message || err}`);
+      }
+    }
+
     // 1. Приоритетный путь: Локальный Faster-Whisper (внутри Docker / на сервере)
     const localWhisperUrls = [
       process.env.WHISPER_BASE_URL,

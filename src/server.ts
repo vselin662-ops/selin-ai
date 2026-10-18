@@ -8,7 +8,6 @@ import dotenv from 'dotenv';
 import { LLMService, llmService } from './core/LLMService';
 import { MemorySystem, memorySystem } from './core/MemorySystem';
 import { TTSService, ttsService, synthesizeForChat, speakable } from './services/voice/TTSService';
-import { FlightService, flightService } from './services/FlightService';
 import { AgentOrchestrator, agentOrchestrator } from './core/AgentOrchestrator';
 import { SelinCore } from './core/SelinCore';
 import { MessageContext, ChannelType, TaskType } from './core/types';
@@ -16,8 +15,6 @@ import { MaxAdapter } from './adapters/MaxAdapter';
 import { TelegramAdapter } from './adapters/TelegramAdapter';
 
 // 2. Импорт специализированных агентов
-import { OrderAgent } from './agents/OrderAgent';
-import { TravelAgent } from './agents/TravelAgent';
 import { NewsAgent } from './agents/NewsAgent';
 import { ContentAgent } from './agents/ContentAgent';
 import { CodingAgent } from './agents/CodingAgent';
@@ -40,7 +37,6 @@ export interface ServerServices {
   llmService: LLMService;
   memorySystem: MemorySystem;
   ttsService: TTSService;
-  flightService: FlightService;
   orchestrator: AgentOrchestrator;
   selinCore: SelinCore;
   maxAdapter: MaxAdapter;
@@ -57,7 +53,6 @@ export function createServerApp(): ServerServices {
   const selinLLM = llmService;
   const selinMemory = memorySystem;
   const selinTTS = ttsService;
-  const selinFlight = flightService;
   const selinOrchestrator = agentOrchestrator;
   const selinCore = new SelinCore(selinLLM);
 
@@ -65,8 +60,6 @@ export function createServerApp(): ServerServices {
   // 2. Регистрация специализированных агентов
   // ==========================================
   selinOrchestrator.registerAgents([
-    new OrderAgent(selinLLM),
-    new TravelAgent(selinLLM, selinFlight),
     new NewsAgent(selinLLM),
     new ContentAgent(selinLLM),
     new CodingAgent(selinLLM),
@@ -164,37 +157,6 @@ export function createServerApp(): ServerServices {
     }
   });
 
-  // Поиск авиабилетов и туров
-  app.get('/api/flights', async (req, res) => {
-    try {
-      const { origin, destination, cabinClass, passengers } = req.query;
-      const deals = await selinFlight.searchFlights({
-        origin: origin ? String(origin) : undefined,
-        destination: destination ? String(destination) : undefined,
-        cabinClass: cabinClass === 'business' ? 'business' : 'economy',
-        passengers: passengers ? Number(passengers) : 1
-      });
-      return res.json({ success: true, count: deals.length, deals });
-    } catch (err: any) {
-      logger.error('❌ Error in /api/flights:', err);
-      return res.status(500).json({ error: err?.message || 'Error searching flights' });
-    }
-  });
-
-  // Голосовое бронирование билетов
-  app.post('/api/flights/voice-book', async (req, res) => {
-    try {
-      const { command } = req.body;
-      if (!command) {
-        return res.status(400).json({ error: 'Voice command is required' });
-      }
-      const result = await selinFlight.voiceBooking(String(command));
-      return res.json(result);
-    } catch (err: any) {
-      logger.error('❌ Error in /api/flights/voice-book:', err);
-      return res.status(500).json({ error: err?.message || 'Voice booking error' });
-    }
-  });
 
   // Синтез речи (TTS)
   app.post(['/api/tts', '/api/synthesize'], async (req, res) => {
@@ -311,7 +273,6 @@ export function createServerApp(): ServerServices {
     llmService: selinLLM,
     memorySystem: selinMemory,
     ttsService: selinTTS,
-    flightService: selinFlight,
     orchestrator: selinOrchestrator,
     selinCore,
     maxAdapter,

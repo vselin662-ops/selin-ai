@@ -1,61 +1,16 @@
-import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { getVoiceConfig } from "../../../db";
 import { normalizeForSpeech } from "../../utils/textUtils";
 import { logger } from "../../logger";
+import { sttService } from "./stt.service";
+import { ttsService } from "./TTSService";
 
 export async function transcribeAudio(audioBuffer: Buffer, filename: string = 'voice.ogg'): Promise<string> {
   try {
-    const key = process.env.GROQ_API_KEY;
-    if (!key) {
-      logger.warn("⚠️ GROQ_API_KEY не задан в окружении! Whisper STT вернет пустую строку.");
-      return "";
-    }
-
-    const form = new FormData();
-    const fileBlob = new Blob([audioBuffer], { type: 'audio/ogg' });
-    form.append('file', fileBlob, filename);
-    form.append('model', 'whisper-large-v3');
-    form.append('language', 'ru');
-
-    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${key}`
-      },
-      body: form,
-      signal: AbortSignal.timeout(25000)
-    });
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok || contentType.includes("text/html")) {
-      const errText = await response.text();
-      logger.error(`❌ [Groq Whisper STT Error] HTTP ${response.status}: ${errText.slice(0, 200)}`);
-      return "";
-    }
-
-    const data = await response.json() as any;
-    let text = (data.text || "").trim();
-
-    // Фильтрация галлюцинаций Whisper при тишине/шуме
-    const lower = text.toLowerCase();
-    if (
-      lower.includes('dimatorzok') ||
-      lower.includes('дима торжок') ||
-      lower.includes('субтитры') ||
-      lower.includes('субтитрами') ||
-      lower.includes('создал субтитры') ||
-      lower.includes('редактор субтитров') ||
-      lower.includes('продолжение следует') ||
-      lower.includes('спасибо за просмотр')
-    ) {
-      logger.warn(`⚠️ [Groq Whisper STT] Отфильтрована галлюцинация Whisper: "${text}"`);
-      text = "";
-    }
-
-    logger.info(`✅ [Groq Whisper STT Success] Распознанный текст: "${text}"`);
+    const text = await sttService.transcribe(audioBuffer);
+    logger.info(`✅ [Sovereign STT Success] Распознанный текст: "${text}"`);
     return text;
   } catch (err: any) {
-    logger.error(`❌ [Groq Whisper STT Failed] Ошибка при распознавании речи: ${err?.message || err}`);
+    logger.error(`❌ [Sovereign STT Failed] Ошибка при распознавании речи: ${err?.message || err}`);
     return "";
   }
 }
@@ -96,19 +51,18 @@ export async function downloadMaxAudio(fileUrl: string): Promise<Buffer> {
 export async function generateAudioTtsBuffer(text: string, chatId?: string | number): Promise<{ buffer: Buffer; voiceName: string }> {
   const voicePrepared = normalizeForSpeech(text);
   const voiceConfig = getVoiceConfig(chatId);
-  const tts = new MsEdgeTTS();
-  await tts.setMetadata(
-    voiceConfig.voice,
-    OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3
-  );
 
-  const { audioStream } = tts.toStream(voicePrepared, { rate: voiceConfig.rate, pitch: voiceConfig.pitch });
-  const chunks: Buffer[] = [];
-  for await (const chunk of audioStream) {
-    if (Buffer.isBuffer(chunk)) chunks.push(chunk);
-    else if (chunk instanceof Uint8Array) chunks.push(Buffer.from(chunk));
+  // Используем суверенный ttsService (Yandex SpeechKit или локальный офлайн фоллбэк)
+  const audioBuffer = await ttsService.synthesize(voicePrepared, {
+    voice: voiceConfig.voice,
+    rate: voiceConfig.rate,
+    pitch: voiceConfig.pitch
+  });
+
+  if (!audioBuffer) {
+    throw new Error("Sovereign TTS failed to synthesize audio");
   }
-  const audioBuffer = Buffer.concat(chunks);
+
   return {
     buffer: audioBuffer,
     voiceName: voiceConfig.gender === 'female' ? 'Kore' : 'Charon'

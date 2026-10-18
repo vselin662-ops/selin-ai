@@ -1,22 +1,12 @@
-import { GoogleGenAI } from '@google/genai';
+import { llmService } from '../../core/LLMService';
 import { logger } from '../../logger';
 
 /**
- * Сервис для взаимодействия с Gemini API.
+ * Сервис для взаимодействия с LLM (ранее Gemini API, теперь суверенный Ollama/Cloud.ru).
  */
 class GeminiService {
-  private ai: GoogleGenAI | null = null;
-
-  private getClient(): GoogleGenAI {
-    if (!this.ai) {
-      const key = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-      this.ai = new GoogleGenAI({ apiKey: key });
-    }
-    return this.ai;
-  }
-
   /**
-   * Генерирует текстовый ответ с помощью модели Gemini.
+   * Генерирует текстовый ответ с помощью суверенной модели.
    *
    * @param prompt - Входной промпт
    * @param options - Дополнительные параметры (температура, модель)
@@ -24,18 +14,10 @@ class GeminiService {
    */
   async generate(prompt: string, options: { temperature?: number; model?: string } = {}): Promise<string> {
     try {
-      const ai = this.getClient();
-      const model = options.model || process.env.GEMINI_MODEL || 'gemini-3.5-flash';
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          temperature: options.temperature ?? 0.7,
-        },
-      });
-      return response.text || '';
+      const response = await llmService.call([{ role: 'user', content: prompt }]);
+      return response || '';
     } catch (err) {
-      logger.error('Error generating text with Gemini', { error: err });
+      logger.error('Error generating text with Sovereign LLM', { error: err });
       throw err;
     }
   }

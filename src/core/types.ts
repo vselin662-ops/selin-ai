@@ -316,3 +316,59 @@ export interface SynthesizedProfile {
   target_audience: string;
   strategic_focus: string;
 }
+
+// ==========================================
+// 11. Абстрактная Модель Данных Универсального Оркестратора (ZADO)
+// ==========================================
+
+/**
+ * Модель "Цель" (Goal):
+ * Абстрактное представление любой цели пользователя без жестких категорий или привязок.
+ */
+export interface Goal {
+  id: string;
+  rawInput: string;                                                      // Исходный запрос пользователя как есть
+  parsedContext: {                                                       // Динамический объект контекста, заполняемый ИИ
+    goalDefinition: string;                                              // Что за цель
+    domain: string;                                                      // Какой домен/сфера деятельности
+    complexity: 'easy' | 'medium' | 'hard' | string;                    // Сложность
+    [key: string]: any;                                                  // Любые другие динамические параметры
+  };
+  successCriteria: string[];                                             // Динамически определенные критерии успеха
+  constraints: string[];                                                 // Выявленные ограничения
+  resources: string[];                                                   // Выявленные необходимые ресурсы
+  currentState: Record<string, any>;                                     // Текущее состояние выполнения цели
+  strategy: string;                                                      // Стратегия достижения, сгенерированная ИИ
+  status: 'active' | 'completed' | 'cancelled' | string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Модель "Шаг" (Step):
+ * Отдельный шаг внутри декомпозированного плана достижения цели.
+ */
+export interface Step {
+  id: string;
+  goalId: string;                                                        // Привязка к Goal
+  description: string;
+  type: string;                                                          // Определяется динамически ИИ, не из списка
+  dependencies: string[];                                                // Массив ID шагов, от которых зависит этот шаг
+  verification: string;                                                  // Инструкция, как проверить выполнение шага
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | string;
+  feedback?: string;                                                     // Обратная связь от пользователя/системы по этому шагу
+}
+
+/**
+ * Модель "Взаимодействие" (Interaction):
+ * Единичный акт коммуникации системы с пользователем по выполняемому шагу.
+ */
+export interface Interaction {
+  id: string;
+  goalId: string;                                                        // Привязка к Goal
+  stepId?: string;                                                       // Опциональная привязка к конкретному шагу
+  type: 'question' | 'instruction' | 'motivation' | 'verification' | string; // Направление/формат взаимодействия
+  content: string;                                                       // Текстовое или мультимедийное наполнение
+  context: string;                                                       // Обоснование ИИ: почему решено отправить именно это
+  timestamp: number;
+}

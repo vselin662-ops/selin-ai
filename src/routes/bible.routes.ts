@@ -30,6 +30,19 @@ function resolveChatId(req: CustomRequest): string {
 }
 
 /**
+ * GET /api/bible/books - Получить список всех канонических книг и количество глав
+ */
+router.get("/books", (req: Request, res: Response) => {
+  try {
+    const books = ScriptureService.getAvailableBooks();
+    return res.status(200).json({ success: true, books });
+  } catch (err: any) {
+    logger.error("Error fetching bible books:", err);
+    return res.status(500).json({ success: false, error: "Failed to load bible books" });
+  }
+});
+
+/**
  * GET /api/bible/read - Получить стих, отрывок или главу
  * Пример: /api/bible/read?query=Иоанна 3:16 или book=Иоанна&chapter=3&verse=16
  */

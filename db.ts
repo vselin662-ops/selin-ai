@@ -440,6 +440,10 @@ Glamorous, dangerous, mysterious noir mood. Rich saturated red-blue-and-gold pal
     if (!hasUpdatedAt) {
       sqliteDb.exec("ALTER TABLE voice_prefs ADD COLUMN updated_at TEXT");
     }
+    const hasMode = columns.some((col: any) => col.name === "mode");
+    if (!hasMode) {
+      sqliteDb.exec("ALTER TABLE voice_prefs ADD COLUMN mode TEXT DEFAULT 'text'");
+    }
   } catch (e) {
     logger.warn(`⚠️ [voice_prefs] Migration error: ${e}`);
   }
@@ -530,6 +534,40 @@ export function getVoiceConfig(chatId?: string | number | null): { voice: string
       pitch: '+0Hz',
       gender: 'male'
     };
+  }
+}
+
+export function getVoiceModePreference(chatId?: string | number | null): 'voice' | 'text' {
+  if (!chatId) return 'text';
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
+  if (sqliteDb) {
+    try {
+      const row = sqliteDb.prepare("SELECT mode FROM voice_prefs WHERE chat_id = ?").get(cleanId);
+      if (row && row.mode) {
+        return row.mode === 'voice' ? 'voice' : 'text';
+      }
+    } catch (e) {
+      logger.warn(`⚠️ [voice_prefs] Error getting voice mode pref: ${e}`);
+    }
+  }
+  return 'text';
+}
+
+export function setVoiceModePreference(chatId: string | number, mode: 'voice' | 'text'): void {
+  if (!chatId) return;
+  const cleanId = String(chatId).replace(/^[a-z_]+/, '').trim() || String(chatId).trim();
+  if (sqliteDb) {
+    try {
+      const now = new Date().toISOString();
+      sqliteDb.prepare(`
+        INSERT INTO voice_prefs (chat_id, mode, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET mode = ?, updated_at = ?
+      `).run(cleanId, mode, now, mode, now);
+      logger.info(`🎙️ [voice_prefs] Set voice mode preference for chat ${cleanId} to ${mode}`);
+    } catch (e) {
+      logger.warn(`⚠️ [voice_prefs] Error setting voice mode pref: ${e}`);
+    }
   }
 }
 

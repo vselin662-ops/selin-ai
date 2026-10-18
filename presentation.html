@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SELIN AI — Презентация Проекта 2026</title>
+    <!-- Встроенный CSS для полной автономности и премиального темного оформления -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0F0D0C;
+            color: #EAE6DF;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 20px 40px;
+            background-color: rgba(22, 18, 16, 0.8);
+            border-bottom: 1px solid #2A231F;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 900;
+            color: #C5A059;
+            letter-spacing: 2px;
+        }
+
+        .version {
+            font-size: 12px;
+            color: #A89E94;
+            background-color: #1C1715;
+            padding: 4px 10px;
+            border-radius: 12px;
+            border: 1px solid #2A231F;
+            font-family: monospace;
+        }
+
+        main {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .slide-container {
+            width: 100%;
+            max-width: 1100px;
+            aspect-ratio: 16/9;
+            background-color: #161210;
+            border: 1px solid #2A231F;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .slide.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .slide img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        footer {
+            padding: 20px 40px;
+            background-color: rgba(22, 18, 16, 0.8);
+            border-top: 1px solid #2A231F;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn {
+            background-color: #1C1715;
+            color: #EAE6DF;
+            border: 1px solid #2A231F;
+            padding: 10px 24px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover:not(:disabled) {
+            background-color: #26201D;
+            border-color: #C5A059;
+            color: #C5A059;
+        }
+
+        .btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background-color: #C5A059;
+            color: #0F0D0C;
+            border-color: #C5A059;
+        }
+
+        .btn-primary:hover {
+            background-color: #D4B06A;
+            color: #0F0D0C;
+        }
+
+        .indicators {
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #2A231F;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .dot.active {
+            background-color: #C5A059;
+            width: 24px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">SELIN AI</div>
+        <div class="version">v1.0.0 Enterprise Ready — 2026</div>
+    </header>
+
+    <main>
+        <div class="slide-container">
+            <!-- Слайд 1 -->
+            <div class="slide active" id="slide-0">
+                <img src="src/assets/images/slide_1.jpg" alt="Слайд 1 — Обложка и Титульный">
+            </div>
+
+            <!-- Слайд 2 -->
+            <div class="slide" id="slide-1">
+                <img src="src/assets/images/slide_2.jpg" alt="Слайд 2 — Стек и БД">
+            </div>
+
+            <!-- Слайд 3 -->
+            <div class="slide" id="slide-2">
+                <img src="src/assets/images/slide_3.jpg" alt="Слайд 3 — Голосовой Движок">
+            </div>
+
+            <!-- Слайд 4 -->
+            <div class="slide" id="slide-3">
+                <img src="src/assets/images/slide_4.jpg" alt="Слайд 4 — Безопасность ИИ">
+            </div>
+
+            <!-- Слайд 5 -->
+            <div class="slide" id="slide-4">
+                <img src="src/assets/images/slide_5.jpg" alt="Слайд 5 — Прикладные Агенты">
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <button class="btn" id="prev-btn" onclick="changeSlide(-1)" disabled>
+            ← Назад
+        </button>
+
+        <div class="indicators" id="indicators">
+            <div class="dot active" onclick="goToSlide(0)"></div>
+            <div class="dot" onclick="goToSlide(1)"></div>
+            <div class="dot" onclick="goToSlide(2)"></div>
+            <div class="dot" onclick="goToSlide(3)"></div>
+            <div class="dot" onclick="goToSlide(4)"></div>
+        </div>
+
+        <button class="btn btn-primary" id="next-btn" onclick="changeSlide(1)">
+            Вперед →
+        </button>
+    </footer>
+
+    <!-- Скрипт управления слайдами без использования внешних библиотек -->
+    <script>
+        let currentSlide = 0;
+        const totalSlides = 5;
+
+        function changeSlide(direction) {
+            goToSlide(currentSlide + direction);
+        }
+
+        function goToSlide(index) {
+            if (index < 0 || index >= totalSlides) return;
+
+            // Выключение старого слайда
+            document.getElementById(`slide-${currentSlide}`).classList.remove('active');
+            document.querySelectorAll('.dot')[currentSlide].classList.remove('active');
+
+            // Включение нового слайда
+            currentSlide = index;
+            document.getElementById(`slide-${currentSlide}`).classList.add('active');
+            document.querySelectorAll('.dot')[currentSlide].classList.add('active');
+
+            // Обновление состояния кнопок
+            document.getElementById('prev-btn').disabled = (currentSlide === 0);
+            document.getElementById('next-btn').disabled = (currentSlide === totalSlides - 1);
+        }
+
+        // Поддержка переключения клавиатурой (стрелки влево/вправо и пробел)
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                changeSlide(1);
+            } else if (e.key === 'ArrowLeft') {
+                changeSlide(-1);
+            }
+        });
+    </script>
+</body>
+</html>

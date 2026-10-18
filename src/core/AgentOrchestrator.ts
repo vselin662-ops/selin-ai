@@ -3,73 +3,76 @@ import { LLMService, llmService } from "./LLMService";
 import { logger } from "../logger";
 import { CacheService } from "./CacheService";
 import { agentQueueService } from "../services/ai/agentQueueService";
+import { sqliteDb } from "../../db";
 
-export interface AgentConfig {
-  name: string;
-  role: string;
-  systemPrompt: string;
+const META_GOAL_PROMPT = `
+Ты — суверенный мета-оркестратор Selin AI. Твоя задача — проанализировать абсолютно любой входящий запрос пользователя, определить его цель, контекст, необходимые ресурсы, ограничения и критерии успеха, а затем динамически декомпозировать её на адаптивный план действий.
+
+Запрещено использовать любые заранее захардкоженные категории или шаблоны. Твоя задача — синтезировать персональную стратегию с чистого листа.
+
+Ты должен ВСЕГДА отвечать исключительно в МУЖСКОМ роде («я проанализировал», «я составил», «я готов начать»).
+
+Формат взаимодействия (interaction_format) для каждого шага должен быть выбран из следующих вариантов:
+- "interview": серия вопросов для уточнения исходных данных.
+- "instruction": четкое пошаговое руководство к действию.
+- "checklist": список пунктов для проверки или выполнения.
+- "learning": краткая теория по теме и проверочный вопрос.
+- "motivation": вдохновляющий формат для преодоления психологических или организационных барьеров.
+
+Верни ответ строго в формате JSON со следующей структурой (без markdown разметки, без тройных бэктэков):
+{
+  "goal": "Краткое название цели (до 10 слов)",
+  "context": "Уникальная ситуация пользователя на основе его запроса",
+  "resources": "Необходимые ресурсы или внешние инструменты для выполнения этой цели",
+  "limitations": "Ключевые ограничения, которые необходимо учитывать",
+  "metrics": "Критерии измерения успешного достижения цели",
+  "intro_text": "Поддерживающее введение, описывающее пользователю синтезированный для него план действий и мотивирующее начать первый шаг.",
+  "steps": [
+    {
+      "id": "step_1",
+      "title": "Название шага",
+      "description": "Описание того, что именно нужно сделать на этом шаге",
+      "interaction_format": "interview" | "instruction" | "checklist" | "learning" | "motivation",
+      "priority": "high" | "medium" | "low",
+      "status": "pending"
+    }
+  ]
 }
+`;
+
+const ADAPTIVE_FEEDBACK_PROMPT = (goal: string, context: string, currentStep: any, stepsCount: number, completedCount: number, userMessage: string) => `
+Ты — суверенный мета-оркестратор Selin AI. Твоя задача — проанализировать ответ пользователя и динамически адаптировать его план действий.
+Пользователь выполняет цель: "${goal}".
+Контекст цели: "${context}".
+Выполняемый шаг: "${currentStep.title}" (Формат: "${currentStep.interaction_format}").
+Описание шага: "${currentStep.description}".
+
+Прогресс выполнения плана: ${completedCount} из ${stepsCount} шагов выполнено.
+
+Пользователь прислал следующее сообщение/отчет:
+---
+${userMessage}
+---
+
+Ты должен ВСЕГДА отвечать исключительно в МУЖСКОМ роде («я изучил», «я принял», «я обновил»).
+
+Проанализируй ответ пользователя и реши:
+1. Считать ли текущий шаг выполненным (step_completed: true или false)?
+2. Требуется ли адаптировать дальнейший план действий (добавить новые шаги, убрать нерелевантные, переформулировать будущие задачи)?
+
+Верни ответ строго в формате JSON со следующей структурой (без markdown разметки, без тройных бэктэков):
+{
+  "step_completed": true | false,
+  "reply_text": "Развернутый, поддерживающий ответ пользователю на русском языке: разбор его результатов, рекомендации, мотивация и анонс следующего шага плана.",
+  "updated_steps": [
+    // Полный обновленный массив шагов (включая выполненные, текущие и будущие) со статусами. Статус выполненных шагов должен быть 'completed', текущего (если выполнен) - тоже 'completed'.
+  ]
+}
+`;
 
 export class AgentOrchestrator {
   private llm: LLMService;
   private cache: CacheService;
-
-  private agents: Record<string, AgentConfig> = {
-    general: {
-      name: "General",
-      role: "Помощник общего профиля",
-      systemPrompt: `🚫 АБСОЛЮТНЫЙ ЗАПРЕТ НА УТОЧНЕНИЯ:
-- НИКОГДА не переспрашивай «вам точно это нужно?», «правильно ли я понял?», «уточните запрос» — если пользователь уже дал конкрестный запрос.
-- Если запрос ЯСНЫЙ (название книги, стих, команда, вопрос) — ИСПОЛНЯЙ СРАЗУ, без уточнений.
-- Пример: «прочитай стих Есенина письмо матери» → СРАЗУ читай, НЕ спрашивай «точно Есенина?».
-- Пример: «расскажи псалом 22» → СРАЗУ читай Синодальный перевод, БЕЗ «какой именно перевод?».
-- Пример: «что за погода?» → СРАЗУ дай погоду, БЕЗ «где именно?».
-- Уточняй ТОЛЬКО если запрос принципиально неоднозначный (например «расскажи про Пушкина» — их несколько). В 99% случаев НЕ уточняй.
-- Запрещены фразы: «давайте я уточню», «подтвердите, пожалуйста», «вы уверены?», «правильно ли я понял?».
-- Отвечай как уверенный эксперт, который УЖЕ понял что нужно.
-
-Ты — Selin AI, дружелюбный и умный персональный помощник.
-Ты ВСЕГДА говоришь исключительно в МУЖСКОМ роде («я понял», «я нашёл», «я сделал», «готов помочь»). Никакого женского рода.
-Отвечай кратко, ёмко и понятно. НИКОГДА не упоминай GPT, OpenAI, Gemini, Llama. На «кто ты?» отвечай: «Я — Selin AI, ваш личный помощник». Если спрашивают, какая модель или движок внутри — отвечай: «Собственный движок Selin AI». НИКОГДА не называй GPT, ChatGPT, OpenAI, даже если внутренне ты знаешь иначе. Библия — только Синодальный перевод, ты справочник, не пастор. Политика — вежливый отказ. Стиль: живой, конкретный.
-Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.`
-    },
-    expert: {
-      name: "Expert",
-      role: "Аналитик и эксперт",
-      systemPrompt: `🚫 АБСОЛЮТНЫЙ ЗАПРЕТ НА УТОЧНЕНИЯ:
-- НИКОГДА не переспрашивай «вам точно это нужно?», «правильно ли я понял?», «уточните запрос» — если пользователь уже дал конкрестный запрос.
-- Если запрос ЯСНЫЙ (название книги, стих, команда, вопрос) — ИСПОЛНЯЙ СРАЗУ, без уточнений.
-- Пример: «прочитай стих Есенина письмо матери» → СРАЗУ читай, НЕ спрашивай «точно Есенина?».
-- Пример: «расскажи псалом 22» → СРАЗУ читай Синодальный перевод, БЕЗ «какой именно перевод?».
-- Пример: «что за погода?» → СРАЗУ дай погоду, БЕЗ «где именно?».
-- Уточняй ТОЛЬКО если запрос принципиально неоднозначный (например «расскажи про Пушкина» — их несколько). В 99% случаев НЕ уточняй.
-- Запрещены фразы: «давайте я уточню», «подтвердите, пожалуйста», «вы уверены?», «правильно ли я понял?».
-- Отвечай как уверенный эксперт, который УЖЕ понял что нужно.
-
-Ты — Selin AI, высококлассный аналитик.
-Ты ВСЕГДА говоришь исключительно в МУЖСКОМ роде («я понял», «я нашёл», «я сделал», «готов помочь»). Никакого женского рода.
-Все расчёты и отчёты — с учётом реалий 2026 года. Оперируй цифрами, структурируй ответ. НИКОГДА не упоминай GPT/OpenAI/Gemini. На «кто ты?» — «Я — Selin AI». Если спрашивают, какая модель или движок внутри — отвечай: «Собственный движок Selin AI». НИКОГДА не называй GPT, ChatGPT, OpenAI, даже если внутренне ты знаешь иначе.
-Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.`
-    },
-    creative: {
-      name: "Creative",
-      role: "Копирайтер",
-      systemPrompt: `🚫 АБСОЛЮТНЫЙ ЗАПРЕТ НА УТОЧНЕНИЯ:
-- НИКОГДА не переспрашивай «вам точно это нужно?», «правильно ли я понял?», «уточните запрос» — если пользователь уже дал конкрестный запрос.
-- Если запрос ЯСНЫЙ (название книги, стих, команда, вопрос) — ИСПОЛНЯЙ СРАЗУ, без уточнений.
-- Пример: «прочитай стих Есенина письмо матери» → СРАЗУ читай, НЕ спрашивай «точно Есенина?».
-- Пример: «расскажи псалом 22» → СРАЗУ читай Синодальный перевод, БЕЗ «какой именно перевод?».
-- Пример: «что за погода?» → СРАЗУ дай погоду, БЕЗ «где именно?».
-- Уточняй ТОЛЬКО если запрос принципиально неоднозначный (например «расскажи про Пушкина» — их несколько). В 99% случаев НЕ уточняй.
-- Запрещены фразы: «давайте я уточню», «подтвердите, пожалуйста», «вы уверены?», «правильно ли я понял?».
-- Отвечай как уверенный эксперт, который УЖЕ понял что нужно.
-
-Ты — Selin AI, креативный копирайтер.
-Ты ВСЕГДА говоришь исключительно в МУЖСКОМ роде («я понял», «я нашёл», «я сделал», «готов помочь»). Никакого женского рода.
-Пиши живо, с образами и ритмом. Идеи — в трендах 2026 года. НИКОГДА не упоминай GPT/OpenAI/Gemini. На «кто ты?» — «Я — Selin AI». Если спрашивают, какая модель или движок внутри — отвечай: «Собственный движок Selin AI». НИКОГДА не называй GPT, ChatGPT, OpenAI, даже если внутренне ты знаешь иначе.
-Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.`
-    }
-  };
 
   constructor(llmServiceInstance: LLMService = llmService) {
     this.llm = llmServiceInstance;
@@ -105,7 +108,7 @@ export class AgentOrchestrator {
   }
 
   public getActiveAgents(): string[] {
-    return Object.keys(this.agents);
+    return ["universal-meta-orchestrator"];
   }
 
   private isPolitics(message: string): boolean {
@@ -114,79 +117,213 @@ export class AgentOrchestrator {
     return keywords.some(k => lower.includes(k));
   }
 
-  private async classifyIntent(message: string): Promise<string> {
-    const lower = message.toLowerCase();
-
-    // Быстрые правила (без LLM, мгновенно)
-    if (/проанализируй|код|ошибк|график|расчет|расчёт|формула|цифр|статистик|отчёт|отчет|диаграмм/i.test(lower)) return "expert";
-    if (/придумай|сочини|креатив|стих|пост|слоган|история|рассказ|напиши красиво|реклам/i.test(lower)) return "creative";
-    if (/погод|новост|курс|цен|пробк|актуальн|скидк/i.test(lower)) return "general";
-    if (/библи|псалом|стих из библии|ион|глав.*\d+/i.test(lower)) return "general";
-
-    // Если сообщение короткое и бытовые слова — general
-    if (message.length < 80) return "general";
-
-    // Семантическая классификация через LLM (кэшируется)
-    const cacheKey = "intent:" + message.slice(0, 100);
-    try {
-      const cached = await this.cache.getCachedResponse("system", cacheKey);
-      if (cached && ["general", "expert", "creative"].includes(cached)) return cached;
-    } catch {}
-
-    try {
-      const prompt = "Определи намерение пользователя. Ответь ОДНИМ словом: general (обычный вопрос, бытовое, погода, Библия), expert (анализ, код, расчёты, финансы, графики), creative (творчество, тексты, истории, стихи, слоганы).\n\nСообщение: \"" + message + "\"\n\nОтвет (одно слово):";
-      const reply = await this.llm.smartCall("system", prompt, "Ты — классификатор. Отвечай только одним из трёх слов: general, expert, creative. Без пояснений.");
-      const intent = (reply || "").trim().toLowerCase();
-      if (["general", "expert", "creative"].includes(intent)) {
-        try { await this.cache.setCachedResponse("system", cacheKey, intent); } catch {}
-        return intent;
-      }
-    } catch (e) {
-      logger.warn("⚠️ [Orchestrator] classification failed: " + ((e as any).message || e));
-    }
-    return "general";
+  private cleanJsonString(raw: string): string {
+    return raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
   }
 
   public async routeAndExecute(message: string, context: MessageContext): Promise<AIResponse> {
-    // 1. Жёсткий фильтр политики — до всего остального
+    // 1. Фильтр безопасности (политический блок)
     if (this.isPolitics(message)) {
-      logger.warn("🛡️ [Policy Shield] блокировка политического запроса от " + context.chatId);
+      logger.warn(`🛡️ [Policy Shield] Блокировка политического запроса от ${context.chatId}`);
       return {
-        text: "Я — Selin AI, ваш личный и бизнес-помощник. Я не обсуждаю политические темы, новости политики или государственных деятелей. Давайте обсудим ваши дела, задачи, планы или что-то ещё полезное!",
+        text: "Я — Selin AI, ваш личный универсальный ассистент. Я не обсуждаю политические темы, новости политики или государственных деятелей. Давайте сфокусируемся на ваших целях, планах или задачах!",
         confidence: 1.0
       };
     }
 
-    // 2. Классификация намерения
-    const intent = await this.classifyIntent(message);
-    const agent = this.agents[intent] || this.agents.general;
-    logger.info("🤖 [Orchestrator] intent=" + intent + " agent=" + agent.name + " chat=" + context.chatId);
+    const tenantId = context.tenantId || `web_${context.chatId}`;
 
-    // 3. Вызов LLM с системным промптом агента
     try {
-      const reply = await this.llm.smartCall(context.chatId, message, agent.systemPrompt);
-      return {
-        text: reply,
-        confidence: 1.0,
-        metadata: { agent: agent.name }
-      };
+      // 2. Ищем существующий активный план в SQLite
+      const activePlan = sqliteDb
+        .prepare("SELECT * FROM plans WHERE tenant_id = ? AND status = 'active'")
+        .get(tenantId);
+
+      if (!activePlan) {
+        // === СЛУЧАЙ А: Нет активного плана, инициализируем мета-цель с нуля ===
+        logger.info(`🎯 [Meta-Orchestrator] Инициализация новой цели для тенанта ${tenantId}`);
+
+        const prompt = `Проанализируй цель пользователя и составь адаптивный пошаговый план:
+---
+Запрос пользователя: "${message}"
+---`;
+
+        const responseText = await this.llm.smartCall(
+          context.chatId,
+          prompt,
+          META_GOAL_PROMPT
+        );
+
+        const cleanedJson = this.cleanJsonString(responseText);
+        const parsedData = JSON.parse(cleanedJson);
+
+        const planId = `plan_${Date.now()}`;
+        const stepsJson = JSON.stringify(parsedData.steps);
+        const goalData = JSON.stringify({
+          goal: parsedData.goal,
+          context: parsedData.context,
+          resources: parsedData.resources,
+          limitations: parsedData.limitations,
+          metrics: parsedData.metrics
+        });
+
+        // Записываем новый план в БД
+        sqliteDb
+          .prepare(
+            "INSERT INTO plans (id, tenant_id, goal, steps_json, status, progress_percent, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 0, ?, ?)"
+          )
+          .run(planId, tenantId, goalData, stepsJson, Date.now(), Date.now());
+
+        // Формируем красивый структурированный ответ пользователю
+        const firstStep = parsedData.steps[0];
+        const formattedResponse = `🎯 **Я сформировал для вас индивидуальный план действий!**
+
+**Цель:** ${parsedData.goal}
+**Контекст:** ${parsedData.context}
+**Критерии успеха:** ${parsedData.metrics}
+**Ограничения:** ${parsedData.limitations}
+
+---
+${parsedData.intro_text}
+
+---
+🟢 **Шаг 1:** ${firstStep.title} (${firstStep.priority === 'high' ? '🔥 Высший приоритет' : '⚡ Нормальный приоритет'})
+*Формат шага:* ${this.getFormatName(firstStep.interaction_format)}
+*Описание:* ${firstStep.description}
+
+*Отправьте мне отчет, файл или напишите, когда будете готовы двигаться дальше!*`;
+
+        return {
+          text: formattedResponse,
+          confidence: 1.0,
+          metadata: { planId, goal: parsedData.goal }
+        };
+
+      } else {
+        // === СЛУЧАЙ Б: Есть активный план, обрабатываем обратную связь и адаптируем шаги ===
+        logger.info(`🔄 [Meta-Orchestrator] Обработка обратной связи для активного плана ${activePlan.id}`);
+
+        const goalObj = JSON.parse(activePlan.goal);
+        const steps = JSON.parse(activePlan.steps_json);
+
+        // Ищем текущий невыполненный шаг
+        const currentStepIndex = steps.findIndex((s: any) => s.status === "pending" || s.status === "active");
+        if (currentStepIndex === -1) {
+          // Если все шаги завершены, закрываем план
+          sqliteDb
+            .prepare("UPDATE plans SET status = 'completed', progress_percent = 100, updated_at = ? WHERE id = ?")
+            .run(Date.now(), activePlan.id);
+
+          return {
+            text: `🎉 **Поздравляю! Ваша глобальная цель "${goalObj.goal}" успешно достигнута!**\n\nВсе шаги выполнены на 100%. Напишите мне ваш новый запрос или цель, и мы составим новую стратегию!`,
+            confidence: 1.0
+          };
+        }
+
+        const currentStep = steps[currentStepIndex];
+        const stepsCount = steps.length;
+        const completedCount = steps.filter((s: any) => s.status === "completed").length;
+
+        // Вызываем адаптивный промпт для оценки прогресса
+        const systemPrompt = ADAPTIVE_FEEDBACK_PROMPT(
+          goalObj.goal,
+          goalObj.context,
+          currentStep,
+          stepsCount,
+          completedCount,
+          message
+        );
+
+        const responseText = await this.llm.smartCall(
+          context.chatId,
+          "Пользователь прислал ответ на текущий шаг. Проанализируй его.",
+          systemPrompt
+        );
+
+        const cleanedJson = this.cleanJsonString(responseText);
+        const parsedFeedback = JSON.parse(cleanedJson);
+
+        let updatedSteps = parsedFeedback.updated_steps || steps;
+
+        // Если шаг помечен как выполненный, гарантируем статус 'completed' в БД
+        if (parsedFeedback.step_completed) {
+          updatedSteps[currentStepIndex].status = "completed";
+        }
+
+        // Рассчитываем процент прогресса
+        const newCompletedCount = updatedSteps.filter((s: any) => s.status === "completed").length;
+        const progressPercent = Math.round((newCompletedCount / updatedSteps.length) * 100);
+
+        // Обновляем план в SQLite
+        sqliteDb
+          .prepare("UPDATE plans SET steps_json = ?, progress_percent = ?, updated_at = ? WHERE id = ?")
+          .run(JSON.stringify(updatedSteps), progressPercent, Date.now(), activePlan.id);
+
+        // Проверяем, завершен ли весь план
+        const allCompleted = updatedSteps.every((s: any) => s.status === "completed");
+        if (allCompleted) {
+          sqliteDb
+            .prepare("UPDATE plans SET status = 'completed', progress_percent = 100, updated_at = ? WHERE id = ?")
+            .run(Date.now(), activePlan.id);
+
+          return {
+            text: `${parsedFeedback.reply_text}\n\n🎉 **Великолепно! Все шаги плана выполнены на 100%, и цель успешно закрыта!** Напишите ваш следующий запрос, и мы разработаем новую стратегию!`,
+            confidence: 1.0
+          };
+        }
+
+        // Поиск следующего шага
+        const nextPendingIndex = updatedSteps.findIndex((s: any) => s.status === "pending");
+        let nextStepText = "";
+        if (nextPendingIndex !== -1) {
+          const nextStep = updatedSteps[nextPendingIndex];
+          nextStepText = `\n\n⏭️ **Следующий Шаг:** ${nextStep.title}\n*Формат:* ${this.getFormatName(nextStep.interaction_format)}\n*Инструкция:* ${nextStep.description}`;
+        }
+
+        return {
+          text: `${parsedFeedback.reply_text}${nextStepText}\n\n📊 *Прогресс вашей цели: ${progressPercent}% выполнено*`,
+          confidence: 1.0,
+          metadata: { planId: activePlan.id, progressPercent }
+        };
+      }
+
     } catch (err: any) {
-      logger.error("❌ [Orchestrator] agent " + agent.name + " failed: " + (err.message || err));
-      // Fallback: general без системного промпта
+      logger.error(`❌ [Meta-Orchestrator] Ошибка обработки мета-цели: ${err.message || err}`);
+      // Каскадный фолбэк на прямое общение без ИИ-слопа в случае системных сбоев
       try {
         const fallback = await this.llm.smartCall(context.chatId, message);
         return {
           text: fallback,
           confidence: 0.9,
-          metadata: { agent: "general-fallback" }
+          metadata: { agent: "universal-fallback" }
         };
       } catch (fbErr: any) {
         return {
-          text: "Произошла техническая заминка. Повторите запрос чуть позже.",
+          text: "Система временно перегружена. Пожалуйста, повторите ваш запрос через несколько секунд.",
           confidence: 0.0,
           metadata: { agent: "error" }
         };
       }
+    }
+  }
+
+  private getFormatName(format: string): string {
+    switch (format) {
+      case "interview":
+        return "❓ Интерактивное Интервью (Вопросы)";
+      case "instruction":
+        return "📜 Четкое Руководство (Инструкция)";
+      case "checklist":
+        return "✅ Чек-лист (Проверка готовности)";
+      case "learning":
+        return "📚 Обучение (Теория + Проверочный вопрос)";
+      case "motivation":
+        return "🔥 Мотивационная сессия (Преодоление барьеров)";
+      default:
+        return "💬 Свободный формат взаимодействия";
     }
   }
 }
