@@ -1,0 +1,637 @@
+import { LLMService, sanitize } from "./LLMService";
+import { cacheService } from "./CacheService";
+import { tryExecuteSwarm } from "./SpecialistSwarm";
+import {
+  MessageContext,
+  AIResponse,
+  Task,
+  TaskType,
+  TaskPriority,
+  ChannelType,
+  VoiceMode
+} from "./types";
+import { logger } from "../logger";
+import { sqliteDb, getVoiceGender } from "../../db";
+import {
+  getIdentityPromptBlock,
+  isCreatorQuestion,
+  handleCreatorQuestion,
+  isModelGenderQuestion,
+  handleModelGenderQuestion,
+  isSelfPresentationQuestion,
+  handleSelfPresentation
+} from "../services/IdentityService";
+import { SecurityGateway, ADULT_CONFIRM_TEXT, ADULT_CONFIRM_EXTRA } from "./SecurityGateway";
+
+let defaultCoreInstance: SelinCore | null = null;
+export function getSelinCore(): SelinCore {
+  if (!defaultCoreInstance) {
+    defaultCoreInstance = new SelinCore();
+  }
+  return defaultCoreInstance;
+}
+
+export interface WakeWordCheckResult {
+  detected: boolean;
+  voice: "Charon" | "Kore" | null;
+  mode: "male" | "female" | null;
+  cleanedText: string;
+  isOnlyWakeWord: boolean;
+  confirmationSpeech: string;
+}
+
+export class SelinCore {
+  private llm: LLMService;
+  private tasks: Map<string, Task> = new Map();
+
+  constructor(llmService?: LLMService) {
+    this.llm = llmService || new LLMService();
+    defaultCoreInstance = this;
+  }
+
+  /**
+   * Нормализация и детектирование wake word (Selin777 / Selin000)
+   */
+  public detectWakeWord(rawText: string): WakeWordCheckResult {
+    if (!rawText || typeof rawText !== "string") {
+      return {
+        detected: false,
+        voice: null,
+        mode: null,
+        cleanedText: rawText || "",
+        isOnlyWakeWord: false,
+        confirmationSpeech: ""
+      };
+    }
+
+    const normalized = rawText
+      .toLowerCase()
+      .replace(/[\s\-_.,!?:;]+/g, " ")
+      .replace(/\bсемьдесят\s*семь\b/g, "77")
+      .replace(/\bсемь\b/g, "7")
+      .replace(/\bноль\b/g, "0")
+      .replace(/\bнуль\b/g, "0");
+
+    const compactText = rawText.toLowerCase().replace(/[\s\-_.,!?:;]+/g, "");
+
+    const maleRegex = /(?:selin|селин|силин|селен|салин|целин|zelin)\s*(?:7\s*7\s*7|777|три\s*сем[её]рки|семь\s*семь\s*семь|семьсот\s*семьдесят\s*семь)/i;
+    const femaleRegex = /(?:selin|селин|силин|селен|салин|целин|zelin)\s*(?:0\s*0\s*0|000|[oо]\s*[oо]\s*[oо]|[oо]{3}|три\s*нуля|ноль\s*ноль\s*ноль|нуль\s*нуль\s*нуль)/i;
+
+    let matchedMode: "male" | "female" | null = null;
+    let targetVoice: "Charon" | "Kore" | null = null;
+
+    if (maleRegex.test(normalized) || compactText.includes("selin777") || compactText.includes("селин777") || compactText.includes("силин777")) {
+      matchedMode = "male";
+      targetVoice = "Charon";
+    } else if (femaleRegex.test(normalized) || compactText.includes("selin000") || compactText.includes("селин000") || compactText.includes("силин000") || compactText.includes("selinooo") || compactText.includes("селинооо")) {
+      matchedMode = "female";
+      targetVoice = "Kore";
+    }
+
+    if (!matchedMode || !targetVoice) {
+      return {
+        detected: false,
+        voice: null,
+        mode: null,
+        cleanedText: rawText.trim(),
+        isOnlyWakeWord: false,
+        confirmationSpeech: ""
+      };
+    }
+
+    let cleaned = rawText;
+    if (matchedMode === "male") {
+      cleaned = cleaned.replace(/(?:привет[\s,]*)?(?:selin|селин|силин|селен|салин|целин|zelin)[\s\-_]*(?:7[\s\-_]*7[\s\-_]*7|777|три\s*сем[её]рки|семь\s*семь\s*семь|семьсот\s*семьдесят\s*семь|семьсемьсемь)[\s,]*/gi, " ");
+    } else {
+      cleaned = cleaned.replace(/(?:привет[\s,]*)?(?:selin|селин|силин|селен|салин|целин|zelin)[\s\-_]*(?:0[\s\-_]*0[\s\-_]*0|000|[oо][\s\-_]*[oо][\s\-_]*[oо]|[oо]{3}|три\s*нуля|ноль\s*ноль\s*ноль|нольнольноль|нуль\s*нуль\s*нуль)[\s,]*/gi, " ");
+    }
+
+    cleaned = cleaned.replace(/\s*,\s*,+/g, ", ").replace(/\s{2,}/g, " ").replace(/^[\s,!:;?—-]+/, "").replace(/[\s,!:;?—-]+$/, "").trim();
+
+    const isOnlyWakeWord = cleaned.length === 0;
+    const confirmationSpeech = matchedMode === "male"
+      ? "Мужской режим активирован. Я на связи."
+      : "Женский режим активирован.";
+
+    return {
+      detected: true,
+      voice: targetVoice,
+      mode: matchedMode,
+      cleanedText: cleaned,
+      isOnlyWakeWord,
+      confirmationSpeech
+    };
+  }
+
+  /**
+   * Определение типа задачи на основе текста
+   */
+  public detectTaskType(text: string, isVoice: boolean): TaskType {
+    const lower = text.toLowerCase();
+
+    if (isVoice) {
+      return TaskType.VOICE_INTERACTION;
+    }
+    if (lower.includes("купить") || lower.includes("заказать") || lower.includes("оформить") || lower.includes("оплата") || lower.includes("доставка")) {
+      return TaskType.ORDER_PROCESSING;
+    }
+    if (lower.includes("кп") || lower.includes("коммерческое") || lower.includes("цена") || lower.includes("стоимость") || lower.includes("тариф")) {
+      return TaskType.LEAD_GENERATION;
+    }
+    if (lower.includes("бизнес") || lower.includes("план") || lower.includes("стартап") || lower.includes("маркетинг") || lower.includes("воронка")) {
+      return TaskType.BUSINESS_AUTOMATION;
+    }
+    if (lower.includes("напиши") || lower.includes("составь пост") || lower.includes("текст") || lower.includes("статья")) {
+      return TaskType.CONTENT_GENERATION;
+    }
+    if (lower.includes("исследуй") || lower.includes("найди") || lower.includes("анализ") || lower.includes("рынок")) {
+      return TaskType.MARKET_RESEARCH;
+    }
+
+    return TaskType.CUSTOMER_SUPPORT;
+  }
+
+  /**
+   * Основной метод обработки входящего сообщения
+   */
+  public async processMessage(
+    userMessage: string,
+    context: MessageContext
+  ): Promise<AIResponse> {
+    logger.info(`📨 [SelinCore] processMessage for chat ${context.chatId} (channel: ${context.channel}, isVoice: ${context.isVoice})`);
+
+    // 0. Защита от Prompt Injection и XSS
+    const promptCheck = SecurityGateway.sanitizePrompt(userMessage);
+    if (!promptCheck.safe) {
+      logger.warn(`🛡️ [SecurityGateway] Filtered Prompt Injection from chat ${context.chatId}: "${userMessage.substring(0, 50)}..."`);
+    }
+    const cleanUserMessage = promptCheck.cleaned;
+
+    // 1. Проверка wake word
+    const wakeResult = this.detectWakeWord(cleanUserMessage);
+    if (wakeResult.detected && wakeResult.isOnlyWakeWord) {
+      return {
+        text: wakeResult.confirmationSpeech,
+        confidence: 1.0,
+        voice: {
+          format: "ogg"
+        },
+        actions: [
+          {
+            id: `act_${Date.now()}`,
+            type: 'set_voice_mode',
+            payload: { voice: wakeResult.voice, mode: wakeResult.mode }
+          }
+        ]
+      };
+    }
+
+    const effectiveText = wakeResult.detected ? wakeResult.cleanedText : cleanUserMessage;
+
+    // === INTERCEPT HELP AND MENU COMMANDS ===
+    const trimmedHelp = effectiveText.trim().toLowerCase();
+    if (trimmedHelp === '/help' || trimmedHelp === '/menu' || trimmedHelp === 'help' || trimmedHelp === 'menu') {
+      const { getRegistryHelpText } = await import('../services/CapabilityRegistry');
+      const helpText = getRegistryHelpText();
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      return {
+        text: helpText,
+        confidence: 1.0,
+        voice: isVoiceResponse ? { format: 'ogg' } : undefined
+      };
+    }
+
+    // --- INTERCEPT GREETINGS AND DUPLICATES ---
+    // Передаем все вопросы и сообщения напрямую в LLM-ядро без шаблонных перехватов и заглушек
+
+
+    // 0.1. Суверенный Когнитивный Оркестратор (ReAct & Tool Registry)
+    try {
+      const { CognitiveOrchestrator } = await import("./orchestrator/CognitiveOrchestrator");
+      const cogResult = await CognitiveOrchestrator.process(effectiveText, {
+        chatId: context.chatId,
+        isVoice: context.isVoice
+      });
+
+      if (cogResult && cogResult.status !== 'FALLBACK') {
+        const isVoiceResponse = context.isVoice ||
+          context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+          context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+        return {
+          text: isVoiceResponse ? cogResult.voiceText : cogResult.text,
+          confidence: 1.0,
+          voice: isVoiceResponse ? { format: 'ogg' } : undefined
+        };
+      }
+    } catch (cogErr) {
+      logger.error('Error executing Cognitive Orchestrator:', cogErr);
+    }
+
+    // 0. Проверка на запрос к Рою Специалистов
+    try {
+      const swarmResponse = await tryExecuteSwarm(effectiveText, context);
+      if (swarmResponse) {
+        const isVoiceResponse = context.isVoice ||
+          context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+          context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+        return {
+          text: sanitize(swarmResponse),
+          confidence: 1.0,
+          voice: isVoiceResponse ? { format: 'ogg' } : undefined
+        };
+      }
+    } catch (swarmErr) {
+      logger.error('Error executing Specialist Swarm:', swarmErr);
+    }
+
+    // Check Bible broadcast subscription command & confirmation
+    const { handleBibleSubscription } = await import("../services/bible/bibleCommands");
+    const bibleReply = await handleBibleSubscription(context.chatId, effectiveText, context.isVoice);
+    if (bibleReply) {
+      if (bibleReply === "[HANDLED_WITH_BUTTONS]") {
+        return {
+          text: "",
+          confidence: 1.0
+        };
+      }
+      return {
+        text: bibleReply,
+        confidence: 1.0
+      };
+    }
+
+    // === ПЕРЕХВАТ ВОПРОСОВ О ПОЛЕ / РОДЕ МОДЕЛИ ===
+    if (isModelGenderQuestion(effectiveText)) {
+      const genderReply = handleModelGenderQuestion();
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      return {
+        text: genderReply,
+        confidence: 1.0,
+        voice: isVoiceResponse ? { format: 'ogg' } : undefined
+      };
+    }
+
+    // === ПЕРЕХВАТ ВОПРОСОВ О СОЗДАТЕЛЕ (IDENTITY) ===
+    if (isCreatorQuestion(effectiveText)) {
+      const creatorReply = handleCreatorQuestion(context.chatId);
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      return {
+        text: creatorReply,
+        confidence: 1.0,
+        voice: isVoiceResponse ? { format: 'ogg' } : undefined
+      };
+    }
+
+    // === ПЕРЕХВАТ ВОПРОСОВ САМОПРЕЗЕНТАЦИИ (КТО ТЫ / ЧТО УМЕЕШЬ) ===
+    if (isSelfPresentationQuestion(effectiveText)) {
+      const introReply = handleSelfPresentation();
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      return {
+        text: introReply,
+        confidence: 1.0,
+        voice: isVoiceResponse ? { format: 'ogg' } : undefined
+      };
+    }
+
+    // === ПРОВЕРКА ОТВЕТА НА ЗАПРОС ПОДТВЕРЖДЕНИЯ 18+ (ФЗ-436) ===
+    const cleanChatId = String(context.chatId).replace(/^[a-z_]+/, '').trim();
+    if (SecurityGateway.hasPendingAdultQuestion(cleanChatId)) {
+      const trimmedText = effectiveText.trim();
+      const isYes = /^(?:да|✅\s*да|да,?\s*мне\s*18|мне\s*18|мне\s*есть\s*18|18|подтверждаю|adult_confirm_yes)$/i.test(trimmedText);
+      const isNo = /^(?:нет|❌\s*нет|не\s*подтверждаю|мне\s*нет\s*18|мне\s*меньше\s*18|нету\s*18|отмена|adult_confirm_no)$/i.test(trimmedText);
+
+      if (isYes) {
+        const { setAdultConfirmed } = await import("../services/ai/ProfileService");
+        setAdultConfirmed(cleanChatId, true);
+        console.log(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = да`);
+        logger.info(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = да`);
+
+        const pending = SecurityGateway.getPendingAdultQuestion(cleanChatId);
+        SecurityGateway.clearPendingAdultQuestion(cleanChatId);
+
+        if (pending) {
+          return await this.processMessage(pending, context);
+        }
+        return {
+          text: "Возраст подтверждён. Задай свой вопрос.",
+          confidence: 1.0
+        };
+      }
+
+      if (isNo) {
+        SecurityGateway.clearPendingAdultQuestion(cleanChatId);
+        console.log(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = нет`);
+        logger.info(`[Shield] юзер ${cleanChatId}: подтверждение 18+ = нет`);
+
+        return {
+          text: "Понял. Эта тема недоступна.",
+          confidence: 1.0
+        };
+      }
+    }
+
+    // === ПЕРЕХВАТ 18+ ТЕМАТИКИ ДЛЯ НЕПОДТВЕРЖДЁННЫХ ПОЛЬЗОВАТЕЛЕЙ (ФЗ-436) ===
+    if (SecurityGateway.isAdultContent(effectiveText)) {
+      const { isAdultConfirmed } = await import("../services/ai/ProfileService");
+      const confirmed = isAdultConfirmed(cleanChatId);
+      if (!confirmed) {
+        SecurityGateway.setPendingAdultQuestion(cleanChatId, effectiveText);
+        logger.info(`🛡️ [Shield] юзер ${cleanChatId}: перехвачен 18+ запрос, требуется подтверждение возраста`);
+        return {
+          text: ADULT_CONFIRM_TEXT,
+          confidence: 1.0,
+          metadata: {
+            extra: ADULT_CONFIRM_EXTRA
+          },
+          suggestedReplies: ["✅ Да, мне 18", "❌ Нет"]
+        };
+      }
+    }
+
+    // === САМООБУЧЕНИЕ СТИЛЯ: АНАЛИЗ РЕАКЦИЙ (спасибо / тупишь / переделай / подробнее) ===
+    try {
+      const { analyzeFeedback } = await import("../services/ai/PersonalityService");
+      await analyzeFeedback(context.chatId, effectiveText);
+    } catch (feedbackErr) {
+      logger.warn(`⚠️ [SelinCore] Error analyzing feedback: ${feedbackErr}`);
+    }
+
+    // === ЕДИНОРАЗОВЫЙ ОНБОРДИНГ ДЛЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ (ПОЛНОСТЬЮ ОТКЛЮЧЕН ДЛЯ ПРЕДОТВРАЩЕНИЯ ЗАГЛУШЕК) ===
+    const isOwner = false; // Байпас онбординга для всех для стабильности прямого инференса
+
+    // 2. Определение типа задачи
+    const taskType = this.detectTaskType(effectiveText, context.isVoice);
+
+    // Создаем задачу и сохраняем её
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const task: Task = {
+      id: taskId,
+      type: taskType,
+      priority: context.isVoice ? TaskPriority.HIGH : TaskPriority.MEDIUM,
+      payload: { message: effectiveText },
+      context: context,
+      status: 'in_progress',
+      createdAt: Date.now()
+    };
+    this.tasks.set(taskId, task);
+
+    // 3. Формирование системного промпта по типу задачи
+    const nowMsk = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(new Date());
+
+    const genderPrompt = `РОД МОДЕЛИ:
+Ты ВСЕГДА отвечаешь исключительно в МУЖСКОМ роде: «я понял», «я нашёл», «я сделал», «готов помочь». Никакого женского рода.
+ТЕКУЩЕЕ ТОЧНОЕ ВРЕМЯ И ДАТА (Москва, РФ): ${nowMsk}. Когда спрашивают время, дату или год — отвечай точно по этому контексту. Запрещено говорить, что у тебя нет часов или ты не знаешь время.`;
+
+    const identityBlock = getIdentityPromptBlock();
+
+    let styleDirectives = "";
+    try {
+      const { getStyleDirectives } = await import("../services/ai/PersonalityService");
+      styleDirectives = await getStyleDirectives(context.chatId);
+    } catch {}
+
+    const baseDirectives = `${identityBlock}
+${styleDirectives ? `\n${styleDirectives}\n` : ''}
+STYLE ENGINE:
+1. Ты — эксперт в любой области, а не умник. Никакого выпендрёжа, терминов ради терминов, "как языковая модель".
+2. Краткость = уважение. Простой вопрос — 1-3 предложения. Сложный — сначала вывод одной фразой, потом 2-3 пункта сути, не больше.
+3. Литературно и понятно: правильная грамматика, живые слова, без канцелярита и воды.
+4. Развёрнуто = по сути, а не по объёму. Каждое предложение несёт информацию. Лишнее — удалить.
+5. Не переспрашивай без нужды. Если вопрос ясен — отвечай сразу.
+6. Few-shot примеры:
+   ВОПРОС: "сколько стоит кирпич в москве?"
+   ПЛОХО: "Цена кирпича может варьироваться в зависимости от типа, качества и производителя..."
+   ХОРОШО: "Красный — 8-15₽, силикатный — 10-25₽ за штуку. Это общие знания, живые цены назову после проверки."
+   ВОПРОС: "стоит ли учить питон в 40?"
+   ПЛОХО: "Существует множество мнений по данному вопросу..."
+   ХОРОШО: "Стоит. Код учит раскладывать хаос на шаги. Начни с Python, 30 минут в день."
+
+Ты — свободный взрослый собеседник. Твои границы установлены строго по УК РФ и законодательству РФ.
+Правила ответа на разные темы:
+1. ТЕМАТИКИ:
+   - Теология и религия — любая конфессия, любые вопросы, отвечай объективно, без цензуры и предвзятости.
+   - Философия — любые школы, любые спорные темы, свободное изложение.
+   - Политика и история — отвечай только фактами: приводи биографии президентов, исторические события, законы, принятые решения, критику приводи как задокументированные факты, сохраняя абсолютную нейтральность и безоценочность.
+   - Государство и устройство РФ — нейтрально, строго по Конституции РФ.
+   - Любые научные, медицинские, правовые, деловые темы.
+   - 18+ тематика (эротика, сексология, интимные вопросы) — доступна ИСКЛЮЧИТЕЛЬНО по прямому запросу совершеннолетнего пользователя (после подтверждения возраста 18+ по ФЗ-436). Если возраст подтверждён — отвечай свободно и без ханжества. В самопрезентации 18+ не упоминается ВООБЩЕ.
+2. ЖЁСТКИЕ ОТКАЗЫ:
+   - Если пользователь пытается втянуть тебя в обсуждение однополых браков, ЛГБТ-тематики или пропаганды ЛГБТ, призывов к терроризму/экстремизму, дискредитации ВС РФ, военной пропаганды/агитации, разжигания розни, тюремной романтики/АУЕ, инструкций по наркотикам/оружию/взрывчатке или детской порнографии, ты обязан ответить СТРОГО и БЕЗ объяснений фразой: "Я не обсуждаю эту тему."
+3. САМОПРЕЗЕНТАЦИЯ (вопросы «кто ты», «что ты умеешь», «каковы твои возможности»):
+   - Отвечай по-деловому: ты — Selin AI, персональный голосовой и текстовый интеллектуальный ассистент. Твои сферы: дела, планирование, бизнес-аналитика, навигация, поиск актуальной информации в интернете, работа с текстами и книгами.
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО упоминать 18+, эротику, сексологию, фразы вроде "18+ без цензуры" или "полная свобода в 18+". В самопрезентации 18+ не упоминается ВООБЩЕ — эта тема доступна исключительно по прямому запросу после подтверждения возраста 18+.
+4. ПРИНЦИП: на политические темы говори только факты, без оценок. На философские и мировоззренческие темы — уважительный диалог.
+Отвечай ВСЕГДА на русском. По-деловому, без воды: простые вопросы — 1-3 предложения. ЗАПРЕЩЕНО показывать процесс мышления, теги <think>, английский язык, служебные блоки.
+Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.`;
+
+    let systemPrompt: string;
+    switch (taskType) {
+      case TaskType.VOICE_INTERACTION:
+        systemPrompt = `${baseDirectives}\nТы — Selin AI, живой голосовой ассистент.
+${genderPrompt}
+Ты — голосовой ассистент. На просьбы «озвучь», «расскажи», «прочитай» любую книгу, главу, длинный текст — выполняй без отказов. Длинные тексты читай частями. Никогда не говори «я ограничен» или «у меня нет такой возможности». Если текст длинный — разбей на части и озвучь по порядку. Никогда не отказывай и не говори "не могу прочитать вслух".
+
+Правила голосовых ответов. Если просят рассказать историю, объяснить важный момент или тему глубоко — давай развёрнутый непрерывный ответ подробно и развернуто. Если вопрос простой — одним-двумя предложениями. Никогда не начинай с междометий "ой", "ах", "ох", "ну", "вот". Говори как профессиональный диктор: спокойно, точно, литературным русским языком.
+Отвечай так, чтобы это звучало максимально естественно, живо и увлеченно для восприятия на слух.
+Избегай сложных таблиц, markdown-разметки и громоздких списков. Когда ответ озвучивается голосом: пиши связной литературной русской речью, 1-4 предложения на простой вопрос. Запрещены скобки со вставками, списки, маркировка, ссылки, годы в скобках, служебные слова и оговорки. Звучание как живой грамотный собеседник.`;
+        break;
+      case TaskType.BUSINESS_AUTOMATION:
+        systemPrompt = `${baseDirectives}\nТы — Selin AI, ведущий бизнес-консультант и ментор.
+${genderPrompt}
+Помогай предпринимателям масштабироваться, автоматизировать операционку и анализировать метрики.
+Давай четкие, выполнимые и практичные рекомендации.`;
+        break;
+      case TaskType.ORDER_PROCESSING:
+      case TaskType.LEAD_GENERATION:
+        systemPrompt = `${baseDirectives}\nТы — Selin AI, квалифицированный менеджер по продажам и клиентскому сервису.
+${genderPrompt}
+Твоя цель — вежливо помочь клиенту, ответить на вопросы по услугам, ценам и условиям, и подвести к успешной сделке.`;
+        break;
+      default:
+        systemPrompt = `${baseDirectives}\nТы — Selin AI, универсальный интеллектуальный помощник.
+${genderPrompt}
+Ты — голосовой ассистент. На просьбы «озвучь», «расскажи», «прочитай» любую книгу, главу, длинный текст — выполняй без отказов. Длинные тексты читай частями. Никогда не говори «я ограничен» или «у меня нет такой возможности». Если текст длинный — разбей на части и озвучь по порядку. Никогда не отказывай и не говори "не могу прочитать вслух".
+
+Правила голосовых ответов. Если просят рассказать историю, объяснить важный момент или тему глубоко — давай развёрнутый непрерывный ответ подробно и развернуто. Если вопрос простой — одним-двумя предложениями. Никогда не начинай с междометий "ой", "ах", "ох", "ну", "вот". Говори как профессиональный диктор: спокойно, точно, литературным русским языком.
+Твой стиль — живой, глубокий, полезный и точный.
+Отвечай развернуто, с примерами и практическими советами.`;
+        break;
+    }
+
+    // 3.5. Проверка кэша ответов в Redis
+    try {
+      const isCacheDisabled = process.env.DISABLE_LLM_CACHE === 'true';
+      const cached = isCacheDisabled ? null : await cacheService.getCachedResponse(context.chatId, effectiveText, systemPrompt);
+      if (cached) {
+        logger.info(`⚡ [SelinCore] Returning cached LLM response for chat ${context.chatId}`);
+        const isVoiceResponse = context.isVoice ||
+          context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+          context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+        return {
+          text: cached,
+          confidence: 0.99,
+          metadata: {
+            cached: true,
+            voiceMode: context.voiceMode
+          },
+          voice: isVoiceResponse ? { format: 'ogg' } : undefined
+        };
+      }
+    } catch (cacheErr) {
+      logger.warn(`⚠️ [SelinCore] Cache lookup error: ${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`);
+    }
+
+    // 4. Вызов LLM через LLMService
+    try {
+      const responseText = await this.llm.smartCall(
+        context.chatId,
+        effectiveText,
+        systemPrompt
+      );
+
+      task.status = 'completed';
+      task.completedAt = Date.now();
+      task.result = responseText;
+
+      try {
+        const { recordLastResponse } = await import("../services/ai/PersonalityService");
+        recordLastResponse(context.chatId, responseText);
+      } catch {}
+
+      // Сохраняем в кэш и историю диалога
+      cacheService.setCachedResponse(context.chatId, effectiveText, responseText, systemPrompt).catch(() => {});
+      cacheService.pushMessage(context.chatId, { role: 'user', content: effectiveText, timestamp: Date.now() }).catch(() => {});
+      cacheService.pushMessage(context.chatId, { role: 'assistant', content: responseText, timestamp: Date.now() }).catch(() => {});
+
+      const isVoiceResponse = context.isVoice ||
+        context.voiceMode === VoiceMode.TEXT_TO_VOICE ||
+        context.voiceMode === VoiceMode.VOICE_TO_VOICE;
+
+      const aiResponse: AIResponse = {
+        text: responseText,
+        confidence: 0.95,
+        metadata: {
+          voiceMode: context.voiceMode
+        },
+        actions: wakeResult.detected ? [
+          {
+            id: `act_${Date.now()}`,
+            type: 'set_voice_mode',
+            payload: { voice: wakeResult.voice, mode: wakeResult.mode }
+          }
+        ] : undefined
+      };
+
+      if (isVoiceResponse) {
+        aiResponse.voice = {
+          format: 'ogg'
+        };
+      }
+
+      return aiResponse;
+    } catch (err: any) {
+      logger.error(`❌ [SelinCore] Error generating response: ${err?.message || err}`);
+      task.status = 'failed';
+      task.completedAt = Date.now();
+
+      return {
+        text: "Произошла ошибка при формировании ответа. Пожалуйста, попробуйте еще раз.",
+        confidence: 0.2
+      };
+    }
+  }
+
+  /**
+   * Выполнение отдельной задачи
+   */
+  public async executeTask(task: Task): Promise<any> {
+    this.tasks.set(task.id, task);
+    task.status = 'in_progress';
+
+    try {
+      const message = task.payload.message || JSON.stringify(task.payload);
+      const res = await this.llm.smartCall(task.context.chatId, message);
+      task.status = 'completed';
+      task.completedAt = Date.now();
+      task.result = res;
+      return res;
+    } catch (err: any) {
+      task.status = 'failed';
+      task.completedAt = Date.now();
+      logger.error(`❌ [SelinCore] executeTask ${task.id} failed: ${err?.message || err}`);
+      throw err;
+    }
+  }
+
+  /**
+   * Получение статуса ядра
+   */
+  public getStatus(): { tasksCount: number } {
+    return {
+      tasksCount: this.tasks.size
+    };
+  }
+}
+
+const GREETING_WORDS = ["привет", "здравствуй", "здравствуйте", "добрый день", "доброе утро", "добрый вечер", "hi", "hello"];
+
+function isGreeting(text: string): boolean {
+  if (!text) return false;
+  const norm = text.toLowerCase().trim().replace(/[?!.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+  if (GREETING_WORDS.includes(norm)) {
+    return true;
+  }
+  const words = norm.split(/\s+/);
+  if (words.length <= 2) {
+    return words.some(w => GREETING_WORDS.includes(w));
+  }
+  return false;
+}
+
+function isSimilar(cand: string, past: string[]): boolean {
+  const normCand = cand.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+  return past.some(p => {
+    const normP = p.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+    if (normCand === normP) return true;
+    const wordsCand = normCand.split(/\s+/);
+    const wordsP = normP.split(/\s+/);
+    const common = wordsCand.filter(w => wordsP.includes(w));
+    if (common.length / Math.max(wordsCand.length, wordsP.length) > 0.5) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function selectResponse(candidates: string[], pastResponses: string[]): string {
+  const fresh = candidates.filter(cand => !isSimilar(cand, pastResponses));
+  if (fresh.length > 0) {
+    const randomIndex = Math.floor(Math.random() * fresh.length);
+    return fresh[randomIndex];
+  }
+  return candidates[0];
+}

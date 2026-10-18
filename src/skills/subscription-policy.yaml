@@ -1,0 +1,7 @@
+skillName: subscription
+version: "1.0.0"
+allowedRoles:
+  - "*"
+trialDays: 3
+standardMonthlyPriceRub: 490
+standardYearlyPriceRub: 4900

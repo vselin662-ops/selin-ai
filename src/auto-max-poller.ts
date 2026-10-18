@@ -1,0 +1,324 @@
+import https from 'https';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+
+console.log('⚡ [AUTO-MAX-POLLER] Module Loaded & Initializing...');
+
+export type PollerUpdateHandler = (update: any) => Promise<void>;
+
+/**
+ * Robust helper to send JSON payloads to internal/external webhook endpoints.
+ * Disables certificate checks (rejectUnauthorized: false) for secure compatibility.
+ */
+function forwardToWebhook(urlStr: string, payload: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlStr);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      const req = client.request(
+        {
+          hostname: url.hostname,
+          port: url.port || (isHttps ? 443 : 80),
+          path: url.pathname + url.search,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload)
+          },
+          rejectUnauthorized: false,
+          timeout: 5000
+        },
+        (res) => {
+          res.resume();
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Status Code: ${res.statusCode}`));
+          }
+        }
+      );
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Timeout'));
+      });
+
+      req.write(payload);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+let pollerHandler: PollerUpdateHandler | null = null;
+
+/**
+ * Registers an in-process direct handler for received updates.
+ * Allows instant, zero-latency update processing without relying purely on local HTTP loopback.
+ */
+export function setPollerWebhookHandler(handler: PollerUpdateHandler) {
+  pollerHandler = handler;
+}
+
+let currentMarker: number | string = 0;
+let isPollingActive = false;
+
+const OFFSET_DIR = '/app/data';
+const OFFSET_FILE = '/app/data/max_offset.json';
+
+function getValidOffsetFile(): string {
+  try {
+    if (!fs.existsSync(OFFSET_DIR)) {
+      fs.mkdirSync(OFFSET_DIR, { recursive: true });
+    }
+    return OFFSET_FILE;
+  } catch {
+    const fallbackDir = path.resolve(process.cwd(), 'data');
+    try {
+      if (!fs.existsSync(fallbackDir)) {
+        fs.mkdirSync(fallbackDir, { recursive: true });
+      }
+      return path.join(fallbackDir, 'max_offset.json');
+    } catch {
+      return OFFSET_FILE;
+    }
+  }
+}
+
+function loadSavedMarker(): void {
+  const file = getValidOffsetFile();
+  try {
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (data?.marker !== undefined && data.marker !== null) {
+        currentMarker = data.marker;
+      } else if (data?.offset !== undefined && data.offset !== null) {
+        currentMarker = data.offset;
+      }
+    }
+  } catch {
+    // Ignore load error
+  }
+}
+
+function saveMarker(marker: number | string): void {
+  const file = getValidOffsetFile();
+  try {
+    const dir = path.dirname(file);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(file, JSON.stringify({ marker, offset: marker }));
+  } catch (err) {
+    console.error('[AUTO-MAX-POLLER] Error saving offset/marker:', err);
+  }
+}
+
+console.log('[AUTO-MAX-POLLER] Started');
+loadSavedMarker();
+
+export async function poll(): Promise<void> {
+  const token = process.env.MAX_BOT_TOKEN;
+  if (!token) {
+    return;
+  }
+
+  if (isPollingActive) {
+    return;
+  }
+  isPollingActive = true;
+
+  try {
+    loadSavedMarker();
+
+    let queryPath = `/updates?limit=20&timeout=5`;
+    if (currentMarker !== undefined && currentMarker !== null && currentMarker !== 0 && currentMarker !== '0') {
+      queryPath = `/updates?marker=${encodeURIComponent(currentMarker)}&offset=${encodeURIComponent(currentMarker)}&limit=20&timeout=5`;
+    }
+
+    console.log(`[AUTO-MAX-POLLER] Polling... path: ${queryPath}`);
+
+    const req = https.request(
+      {
+        hostname: 'platform-api2.max.ru',
+        path: queryPath,
+        method: 'GET',
+        headers: {
+          Authorization: token,
+          'User-Agent': 'SelinAI-MaxPoller/2.0'
+        },
+        timeout: 10000,
+        rejectUnauthorized: false
+      },
+      (res) => {
+        let rawData = '';
+
+        res.on('data', (chunk) => {
+          rawData += chunk;
+        });
+
+        res.on('end', async () => {
+          if (res.statusCode === 401) {
+            console.error('[AUTO-MAX-POLLER] ❌ Unauthorized! Please check your MAX_BOT_TOKEN. Stopping poller.');
+            isPollingActive = true; // Keep it true to effectively stop further polls
+            return;
+          }
+
+          isPollingActive = false;
+          console.log(`[AUTO-MAX-POLLER] Response status: ${res.statusCode}. Body length: ${rawData.length}. Body: ${rawData}`);
+          try {
+            if (!rawData || rawData.trim() === '') {
+              return;
+            }
+
+            const json = JSON.parse(rawData);
+
+            // MAX Bot API returns updates in `updates` or Telegram-compatible `result`
+            const updatesList: any[] = Array.isArray(json.updates)
+              ? json.updates
+              : Array.isArray(json.result)
+              ? json.result
+              : Array.isArray(json)
+              ? json
+              : [];
+
+            // Update marker/offset for next iteration
+            let newMarker: any = undefined;
+            if (json.marker !== undefined && json.marker !== null) {
+              newMarker = json.marker;
+            } else if (json.offset !== undefined && json.offset !== null) {
+              newMarker = json.offset;
+            } else if (updatesList.length > 0) {
+              const last = updatesList[updatesList.length - 1];
+              if (typeof last.update_id === 'number') {
+                newMarker = last.update_id + 1;
+              } else if (typeof last.timestamp === 'number') {
+                newMarker = last.timestamp;
+              }
+            }
+
+            if (newMarker !== undefined) {
+              currentMarker = newMarker;
+              saveMarker(newMarker);
+            }
+
+            if (updatesList.length > 0) {
+              console.log(`[AUTO-MAX-POLLER] Got Message: ${updatesList.length} update(s) received`);
+
+              for (const update of updatesList) {
+                // 1. Process update (prefer in-process handler, fallback to webhook)
+                if (pollerHandler) {
+                  try {
+                    await pollerHandler(update);
+                  } catch (handlerErr) {
+                    console.error('[AUTO-MAX-POLLER] In-process handler error:', handlerErr);
+                  }
+                } else {
+                  // Fallback to internal webhook if handler not registered
+                  const port = process.env.PORT || 3000;
+                  const forwardPayload = JSON.stringify(update);
+
+                  forwardToWebhook(`http://127.0.0.1:${port}/api/max/webhook`, forwardPayload).catch(() => {
+                    forwardToWebhook(`http://localhost:${port}/api/max/webhook`, forwardPayload).catch((forwardErr) => {
+                      console.error('[AUTO-MAX-POLLER] Forward error:', forwardErr);
+                    });
+                  });
+                }
+              }
+            }
+          } catch (parseErr) {
+            // Ignore parse errors on malformed payloads
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy();
+      isPollingActive = false;
+    });
+
+    req.on('error', (e) => {
+      // Small delay before allowing next poll on error
+      setTimeout(() => {
+        isPollingActive = false;
+      }, 2000);
+
+      if (e.message === 'socket hang up') {
+        console.log('[AUTO-MAX-POLLER] Connection closed by server (socket hang up) - retrying in 2s...');
+      } else {
+        console.error('[AUTO-MAX-POLLER] Network Error:', e.message);
+      }
+    });
+
+    req.end();
+  } catch (netErr: any) {
+    console.error('[AUTO-MAX-POLLER] Unexpected request error:', netErr?.message || netErr);
+    isPollingActive = false;
+  }
+}
+
+// Poll every 1.5 seconds if token exists (fast responsiveness)
+const pollInterval = setInterval(() => {
+  if (process.env.MAX_BOT_TOKEN) {
+    poll().catch(() => {});
+  }
+}, 1500);
+pollInterval.unref();
+
+function clearAllSubscriptions(): Promise<void> {
+  return new Promise((resolve) => {
+    const token = process.env.MAX_BOT_TOKEN;
+    if (!token) {
+      return resolve();
+    }
+    console.log('[AUTO-MAX-POLLER] Cleaning any active webhook subscriptions via DELETE /subscriptions...');
+    const req = https.request(
+      {
+        hostname: 'platform-api2.max.ru',
+        path: '/subscriptions',
+        method: 'DELETE',
+        headers: {
+          Authorization: token,
+          'User-Agent': 'SelinAI-MaxPoller/2.0'
+        },
+        rejectUnauthorized: false,
+        timeout: 10000
+      },
+      (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          console.log(`[AUTO-MAX-POLLER] Subscription cleanup response status: ${res.statusCode}. Body: ${rawData}`);
+          resolve();
+        });
+      }
+    );
+    req.on('error', (err) => {
+      console.error('[AUTO-MAX-POLLER] Webhook subscription cleanup failed:', err.message);
+      resolve();
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      console.warn('[AUTO-MAX-POLLER] Webhook subscription cleanup timed out.');
+      resolve();
+    });
+    req.end();
+  });
+}
+
+// Kick off initial poll after server bootstrap delay and webhook cleanup
+if (process.env.MAX_BOT_TOKEN) {
+  setTimeout(() => {
+    clearAllSubscriptions().then(() => {
+      poll().catch(() => {});
+    });
+  }, 1500);
+}
