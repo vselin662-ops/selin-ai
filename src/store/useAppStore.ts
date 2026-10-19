@@ -10,9 +10,9 @@ interface VoiceDialogueState {
 
 interface AppStore {
   // Navigation
-  activeTab: 'main' | 'languages' | 'business' | 'bible' | 'feed' | 'vpn' | 'moderation' | 'knowledge' | 'settings' | 'presentation' | 'lifestyle';
+  activeTab: 'main' | 'languages' | 'business' | 'bible' | 'feed' | 'vpn' | 'moderation' | 'knowledge' | 'settings' | 'lifestyle';
   menuOpen: boolean;
-  setActiveTab: (tab: 'main' | 'languages' | 'business' | 'bible' | 'feed' | 'vpn' | 'moderation' | 'knowledge' | 'settings' | 'presentation' | 'lifestyle') => void;
+  setActiveTab: (tab: 'main' | 'languages' | 'business' | 'bible' | 'feed' | 'vpn' | 'moderation' | 'knowledge' | 'settings' | 'lifestyle') => void;
   setMenuOpen: (open: boolean) => void;
 
   // Voice & TTS State

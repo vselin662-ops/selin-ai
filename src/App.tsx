@@ -40,7 +40,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { FAQPanel } from './components/FAQPanel';
 
 import { VPNPanel } from './components/VPNPanel';
-import { ContestSlidesPanel } from './components/ContestSlidesPanel';
+
 import { AppConfig } from './types';
 import { adminApi } from './lib/adminApi';
 import { useAppStore } from './store/useAppStore';
@@ -605,15 +605,7 @@ export default function App() {
               <Sliders className="w-4 h-4" />
               <span>Настройки</span>
             </button>
-            <button
-              onClick={() => { setActiveTab('presentation'); setMenuOpen(false); }}
-              className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-all ${
-                activeTab === 'presentation' ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold' : 'text-[#9E958C] hover:bg-[#221C19] hover:text-[#EAE6DF]'
-              }`}
-            >
-              <Award className="w-4 h-4 text-[#C5A059]" />
-              <span>Презентация 2026</span>
-            </button>
+
           </div>
         )}
       </header>
@@ -732,17 +724,7 @@ export default function App() {
             <span>Настройки</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('presentation')}
-            className={`px-4 py-2 rounded-xl text-xs font-medium transition-all shrink-0 flex items-center gap-2 ${
-              activeTab === 'presentation'
-                ? 'bg-[#C5A059] text-[#0F0D0C] font-semibold'
-                : 'bg-[#1C1715] text-[#9E958C] hover:text-[#EAE6DF] hover:bg-[#26201D]'
-            }`}
-          >
-            <Award className="w-3.5 h-3.5 text-amber-400" />
-            <span>Презентация 2026</span>
-          </button>
+
         </div>
 
         {/* Интерактивная Кнопка Мануала и Руководства для текущего открытого окна */}
@@ -764,7 +746,7 @@ export default function App() {
                 {activeTab === 'moderation' && 'Панель модерации контента и управление поведением нейросети.'}
                 {activeTab === 'knowledge' && 'Локальный суверенный поисковик и база знаний проекта (без передачи данных в США).'}
                 {activeTab === 'settings' && 'Конфигурация проекта, выбор голоса и тон общения ИИ.'}
-                {activeTab === 'presentation' && 'Интерактивная питч-презентация проекта Selin AI со всеми сухими фактами и архитектурой.'}
+
               </p>
             </div>
           </div>
@@ -1069,8 +1051,8 @@ export default function App() {
           </div>
         )}
 
+
         {/* PANELS FROM HEADQUARTERS */}
-        {activeTab === 'presentation' && <ContestSlidesPanel />}
         {activeTab === 'feed' && <StaffFeed />}
         {activeTab === 'vpn' && <VPNPanel />}
         {activeTab === 'bible' && <BibleTrackerPanel />}

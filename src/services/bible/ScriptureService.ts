@@ -21,7 +21,7 @@ export interface ScriptureResult {
 }
 
 const ALLOWED_PSALMS = [
-  1, 2, 3, 8, 15, 22, 23, 26, 27, 33, 34, 37, 50, 51, 62, 84, 90, 102, 103, 120, 126, 127, 130, 145, 150
+  1, 2, 3, 8, 15, 22, 23, 26, 27, 33, 34, 37, 50, 51, 62, 84, 90, 102, 103, 120, 126, 127, 130, 131, 145, 150
 ];
 
 // Book name normalizer mapping (Russian synonyms, English names, abbreviations)
