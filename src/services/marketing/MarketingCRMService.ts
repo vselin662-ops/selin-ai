@@ -75,7 +75,7 @@ export class MarketingCRMService {
 
     try {
       const prompt = `Контекст цели: ${clientGoal || 'Продажа и долгосрочное удержание'}\nДиалог:\n"""${chatLog}"""`;
-      const response = await llmService.smartCall(chatId, prompt, systemPrompt);
+      const response = await llmService.smartCall(String(chatId), prompt, systemPrompt);
 
       return {
         sentiment: 'Анализ завершен',
@@ -116,7 +116,7 @@ export class MarketingCRMService {
    - План действий на ближайшие 7 дней.`;
 
     const userPrompt = `Ниша: ${niche}\nЦель: ${goal}`;
-    return await llmService.smartCall(chatId, userPrompt, systemPrompt);
+    return await llmService.smartCall(String(chatId), userPrompt, systemPrompt);
   }
 
   /**

@@ -78,7 +78,7 @@ export class SmartPlannerHandler implements IMessageHandler {
 
       // 4. List tasks
       if (lower === 'мои задачи') {
-        const tasks = smartPlannerService.getTasks(ctx.chatId);
+        const tasks = smartPlannerService.getTasksForDate(ctx.chatId);
         if (tasks.length === 0) {
           return { handled: true, replyText: '📝 У вас пока нет задач. Добавьте командой «задача: Текст».' };
         }

@@ -5,7 +5,6 @@ import mammoth from "mammoth";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { sqliteDb } from "../../db";
-import { SSHService } from "../services/SSHService";
 import { SecurityAuditService } from "../services/SecurityAuditService";
 import { VPNService } from "../services/network/VPNService";
 import { selinTunnelEngine } from "../services/network/SelinTunnelEngine";
@@ -342,91 +341,7 @@ adminRouter.post(["/max/send-message", "/telegram/send-message"], async (req, re
   return res.json({ success: true });
 });
 
-// 10. Admin Terminal (System Commands)
-adminRouter.get("/admin/terminal/status", (req, res) => {
-  return res.json({
-    configured: SSHService.isConfigured(),
-    host: '176.108.252.111',
-    user: 'ubuntu'
-  });
-});
 
-adminRouter.post("/admin/terminal", async (req, res) => {
-  const { command } = req.body;
-  const user = (req as any).user;
-  const chatId = user?.chatId || user?.sub || 'unknown';
-  const ip = req.ip || req.socket.remoteAddress;
-
-  if (!command) return res.status(400).json({ error: "Command is required" });
-
-  // Список разрешенных безопасных команд или их префиксов
-  const allowedCommands = [
-    'ls', 'pwd', 'uptime', 'free', 'df', 'docker ps', 'docker stats', 
-    'ollama list', 'git status', 'uname', 'date', 'ps aux | grep selin',
-    'tail -n 50 logs/app.log', 'tail -n 50 logs/error.log',
-    'cd /services/selin-ai && sudo git pull',
-    'sudo git pull',
-    'sudo docker compose',
-    'curl', 'ping -c 4', 'nslookup', 'wget'
-  ];
-
-  const isAllowed = allowedCommands.some(c => command.startsWith(c));
-  
-  // Дополнительная проверка на опасные символы (блокируем ; , < , > , $ , | )
-  const isDangerous = /[;><$]/.test(command) || (command.includes('|') && !command.includes('grep'));
-  
-  if (!isAllowed && isDangerous) {
-    await SecurityAuditService.logEvent({
-      chatId,
-      action: 'TERMINAL_COMMAND_BLOCKED',
-      command,
-      ip,
-      status: 'blocked',
-      details: 'Attempted dangerous or unsupported command'
-    });
-    logger.warn(`🛑 [Terminal] Blocked dangerous/unsupported command: ${command}`);
-    return res.status(403).json({ error: "Command not allowed for safety reasons" });
-  }
-
-  try {
-    logger.info(`📟 [Terminal] Executing command: ${command}`);
-    
-    await SecurityAuditService.logEvent({
-      chatId,
-      action: 'TERMINAL_COMMAND_EXECUTE',
-      command,
-      ip,
-      status: 'success'
-    });
-
-    // Если настроен удаленный SSH-доступ, выполняем там. Если нет - локально.
-    if (SSHService.isConfigured()) {
-      const result = await SSHService.executeRemote(command);
-      return res.json({
-        stdout: result.stdout,
-        stderr: result.stderr,
-        error: result.error,
-        timestamp: new Date().toISOString(),
-        remote: true
-      });
-    }
-
-    const { stdout, stderr } = await execAsync(command, { timeout: 300000 });
-    return res.json({
-      stdout: stdout || "",
-      stderr: stderr || "",
-      timestamp: new Date().toISOString(),
-      remote: false
-    });
-  } catch (error: any) {
-    return res.json({
-      stdout: error.stdout || "",
-      stderr: error.stderr || error.message || "Unknown error",
-      code: error.code,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
 
 // 11. VPN Control
 // (Moved to top)

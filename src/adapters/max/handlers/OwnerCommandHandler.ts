@@ -39,7 +39,7 @@ export class OwnerCommandHandler implements IMessageHandler {
       }
 
       if (text === '/users' || text === 'пользователи' || text === 'клиенты') {
-        const { sqliteDb } = await import('../../../db');
+        const { sqliteDb } = await import('../../../../db');
         let subs: any[] = [];
         let profiles: any[] = [];
         try {

@@ -23,6 +23,7 @@ export class DefaultLLMHandler implements IMessageHandler {
     try {
       logger.info(`[DefaultLLMHandler] Delegating text to SelinCore for chat ${ctx.chatId}`);
       const response = await this.selinCore.processMessage(ctx.text, {
+        tenantId: ctx.chatId,
         chatId: ctx.chatId,
         channel: ChannelType.MAX,
         isVoice: ctx.isVoiceInput

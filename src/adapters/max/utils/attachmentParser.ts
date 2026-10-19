@@ -11,12 +11,13 @@ export function parseAttachments(payload: MaxWebhookPayload): ParsedAttachments 
     hasLocation: false
   };
 
+  const p = payload as any;
   const rawAttachments =
-    payload.message?.body?.attachments ||
-    payload.body?.message?.body?.attachments ||
-    payload.body?.attachments ||
-    payload.body?.message?.attachments ||
-    payload.message?.attachments ||
+    p.message?.body?.attachments ||
+    p.body?.message?.body?.attachments ||
+    p.body?.attachments ||
+    p.body?.message?.attachments ||
+    p.message?.attachments ||
     [];
 
   if (Array.isArray(rawAttachments)) {

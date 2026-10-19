@@ -25,39 +25,24 @@ export class RAGHandler implements IMessageHandler {
       const text = ctx.text.trim();
       const lower = ctx.lowerText;
 
-      // 1. Query documents with DeepSearch
+      // 1. Query documents
       if (lower.startsWith('найди:') || lower.startsWith('найди ')) {
         const query = text.replace(/^найди:?\s*/i, '').trim();
         if (!query) {
           return { handled: true, replyText: '🔍 Укажите поисковый запрос по вашим документам.' };
         }
 
-        const deepRes = await DeepSearchEngine.iterativeSearch(query, async (q) => {
-          const res = await documentRAGService.queryDocuments(ctx.chatId, q);
-          return res.sources.length > 0 ? [res] : [];
-        });
-
-        const ragResult =
-          deepRes.results.length > 0
-            ? deepRes.results[0]
-            : await documentRAGService.queryDocuments(ctx.chatId, query);
-
-        let reply = `🔍 **Ответ на основе ваших документов**:\n\n${ragResult.answer}`;
-
-        if (ragResult.sources.length > 0) {
-          reply += '\n\n📄 **Источники**: ' + ragResult.sources.join(', ');
-        }
-
+        const answer = await documentRAGService.queryDocuments(ctx.chatId, query);
         return {
           handled: true,
-          replyText: reply,
-          voiceText: ragResult.answer
+          replyText: `🔍 **Ответ на основе ваших документов**:\n\n${answer}`,
+          voiceText: answer
         };
       }
 
       // 2. List user documents
       if (lower === 'мои документы') {
-        const docs = await documentRAGService.getUserDocuments(ctx.chatId);
+        const docs = documentRAGService.listDocuments(ctx.chatId);
         if (docs.length === 0) {
           return {
             handled: true,
@@ -67,7 +52,7 @@ export class RAGHandler implements IMessageHandler {
 
         let reply = '📂 **Загруженные документы**:\n\n';
         docs.forEach((d) => {
-          reply += `• [#${d.id}] **${d.filename}** (${Math.round(d.file_size / 1024)} КБ, чанков: ${d.chunks_count})\n`;
+          reply += `• [#${d.id}] **${d.filename}** (чанков: ${d.total_chunks})\n`;
         });
         reply += '\n_Удалить: «удали документ [ID]»_';
         return { handled: true, replyText: reply.trim() };

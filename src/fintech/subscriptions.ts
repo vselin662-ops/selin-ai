@@ -64,7 +64,7 @@ export async function checkAndSendSubscriptionReminders(
     const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(now);
     const subs = sqliteDb.prepare("SELECT * FROM subscriptions WHERE active = 1").all() as any[];
 
-    const { SUBSCRIPTION_EXTRA } = await import("../adapters/MaxAdapter");
+    const SUBSCRIPTION_EXTRA = { inline_keyboard: [[{ text: '💳 Продлить подписку', callback_data: '/subscribe' }]] };
 
     for (const sub of subs) {
       const cleanId = String(sub.chat_id).replace(/^[a-z_]+/, '');

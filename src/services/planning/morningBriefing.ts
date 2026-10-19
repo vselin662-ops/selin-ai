@@ -165,8 +165,8 @@ export async function buildUserMorningBriefing(chatId: string, userName?: string
 
   // Сборка ИИ-Заботы (Суверенный Проактивный Оркестратор)
   try {
-    const { MemorySystem } = await import('../../../core/MemorySystem');
-    const { llmService } = await import('../../../core/LLMService');
+    const { MemorySystem } = await import('../../core/MemorySystem');
+    const { llmService } = await import('../../core/LLMService');
     const memSystem = new MemorySystem();
     const profile = await memSystem.getProfile(chatId);
     

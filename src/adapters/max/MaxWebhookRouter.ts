@@ -24,24 +24,25 @@ export class MaxWebhookRouter {
    * Main router entry point: builds context, deduplicates, and executes chain.
    */
   public async route(payload: MaxWebhookPayload): Promise<boolean> {
+    const p = payload as any;
     const rawMid =
-      payload.message?.body?.mid ||
-      payload.body?.message?.body?.mid ||
-      payload.message?.body?.seq ||
-      payload.mid ||
-      payload.body?.mid ||
-      payload.body?.seq ||
-      payload.message?.mid ||
+      p.message?.body?.mid ||
+      p.body?.message?.body?.mid ||
+      p.message?.body?.seq ||
+      p.mid ||
+      p.body?.mid ||
+      p.body?.seq ||
+      p.message?.mid ||
       '';
     const messageId = String(rawMid).trim();
 
     // 1. Deduplication Check (только для обычных текстовых сообщений, НЕ для callback-кликов!)
     const isCallback = Boolean(
-      payload.callback_id ||
-      payload.callback_data ||
-      payload.body?.callback_id ||
-      payload.type === 'callback' ||
-      payload.event === 'callback'
+      p.callback_id ||
+      p.callback_data ||
+      p.body?.callback_id ||
+      p.type === 'callback' ||
+      p.event === 'callback'
     );
 
     if (messageId && !isCallback) {
@@ -54,19 +55,19 @@ export class MaxWebhookRouter {
 
     // 2. Extract and validate chatId
     const rawChatId =
-      payload.message?.recipient?.chat_id ||
-      payload.body?.message?.recipient?.chat_id ||
-      payload.recipient?.chat_id ||
-      payload.chat_id ||
-      payload.user_id ||
-      payload.body?.user?.user_id ||
-      payload.body?.user?.id ||
-      payload.body?.sender?.user_id ||
-      payload.body?.sender?.id ||
-      payload.body?.message?.sender?.user_id ||
-      payload.body?.message?.sender?.id ||
-      payload.message?.sender?.user_id ||
-      payload.message?.sender?.id ||
+      p.message?.recipient?.chat_id ||
+      p.body?.message?.recipient?.chat_id ||
+      p.recipient?.chat_id ||
+      p.chat_id ||
+      p.user_id ||
+      p.body?.user?.user_id ||
+      p.body?.user?.id ||
+      p.body?.sender?.user_id ||
+      p.body?.sender?.id ||
+      p.body?.message?.sender?.user_id ||
+      p.body?.message?.sender?.id ||
+      p.message?.sender?.user_id ||
+      p.message?.sender?.id ||
       '';
 
     let chatId = '';
@@ -80,16 +81,16 @@ export class MaxWebhookRouter {
 
     // 3. Extract text
     const rawText =
-      payload.message?.body?.text ||
-      payload.body?.message?.body?.text ||
-      payload.body?.text ||
-      payload.body?.message?.text ||
-      payload.message?.text ||
-      (payload.update_type === 'bot_started' ? '/start' : '') ||
-      payload.callback_data ||
-      payload.body?.payload ||
-      payload.payload?.payload ||
-      payload.payload?.data ||
+      p.message?.body?.text ||
+      p.body?.message?.body?.text ||
+      p.body?.text ||
+      p.body?.message?.text ||
+      p.message?.text ||
+      (p.update_type === 'bot_started' ? '/start' : '') ||
+      p.callback_data ||
+      p.body?.payload ||
+      p.payload?.payload ||
+      p.payload?.data ||
       '';
     const text = typeof rawText === 'string' ? rawText.trim() : '';
 

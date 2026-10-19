@@ -90,6 +90,10 @@ class Logger {
     return JSON.stringify(logEntry);
   }
 
+  public debug(message: string, context?: LogContext | any): void {
+    console.log(this.formatMessage("info", message, context));
+  }
+
   public info(message: string, context?: LogContext | any): void {
     console.log(this.formatMessage("info", message, context));
   }

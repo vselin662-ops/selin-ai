@@ -275,7 +275,7 @@ export class TTSService {
 
     // Попытка 1: Абсолютный офлайн-фолбэк (полностью локальный, работает без интернета)
     if (!audioBuffer) {
-      logger.warn('[TTSService] Yandex API key missing or failed. Generating offline local fallback tone.');
+      logger.debug('[TTSService] Yandex API key missing, generating offline local fallback tone.');
       audioBuffer = this.generateFallbackToneWav(cleanText);
       contentType = 'audio/wav';
       ttsRequestsTotal.inc({ engine: 'fallback' });
